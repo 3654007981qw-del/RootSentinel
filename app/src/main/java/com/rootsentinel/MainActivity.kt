@@ -130,6 +130,11 @@ enum class Page(val label: String) {
 /** 扫描期间的实时状态（Compose snapshot state，可从后台线程写入） */
 class ScanState {
     var scanning by mutableStateOf(false)
+    /** v2.22.43：真实取消信号。之前 onCancel 直接把 scanning 置 false，
+     *  引擎的取消检查点从未被接通（isCancelled 没人传），扫描在后台
+     *  继续跑，而 UI 却允许立刻开新一轮。现在取消只置这个标志，
+     *  scanning 保持 true 直到引擎真正返回，避免两轮扫描并发。 */
+    var cancelRequested by mutableStateOf(false)
     var moduleName by mutableStateOf("准备中…")
     var moduleIdx by mutableIntStateOf(0)
     var total by mutableIntStateOf(0)
@@ -187,6 +192,7 @@ fun RootApp() {
     fun startScan() {
         if (scan.scanning) return
         scan.scanning = true
+        scan.cancelRequested = false
         scan.failed = false
         scan.timedOut = false
         scan.total = 0
@@ -213,6 +219,7 @@ fun RootApp() {
                             }
                         }
                     },
+                    isCancelled = { scan.cancelRequested },
                 )
             } catch (t: Throwable) {
                 null
@@ -474,7 +481,7 @@ fun RootApp() {
                     Page.SCAN -> ScanPage(
                         scan = scan,
                         onRescan = { startScan() },
-                        onCancel = { scan.scanning = false },
+                        onCancel = { scan.cancelRequested = true },
                     )
 
                     Page.REPORT -> ReportPage(

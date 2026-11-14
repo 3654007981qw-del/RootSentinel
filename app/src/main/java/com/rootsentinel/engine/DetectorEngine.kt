@@ -34,6 +34,8 @@ class DetectorEngine(private val context: Context) {
         val elapsedMs: Long,
         /** native 侧自报版本，用于核对 Java / Native 是否同步 */
         val nativeVersion: String = "",
+        /** 交叉验证矛盾明细（v2.22.43）：供 JSON 导出复算 hookScore */
+        val crosses: List<com.rootsentinel.model.CrossCheck> = emptyList(),
     ) {
         val grade: Grade get() = score.grade
     }
@@ -397,6 +399,33 @@ class DetectorEngine(private val context: Context) {
             onItem?.invoke(ev.id, ev.title, ev.severity.name, ev.verdict.name, ev.category.code)
         }
 
+        // ---------------------------------------------------------- 收尾取消检查
+        // v2.22.43：用户在最后一个 Java 阶段跑完之后（阶段循环已退出、
+        // cancelled 仍为 false）才按下取消时，跨进程探针会被 isCancelled
+        // 跳过，却不落任何 Z.CANCELLED 证据，评分器无从知道扫描被取消，
+        // 仍可能给出 CLEAN。这里补一条 SKIPPED 证据，保证 cancelledScan
+        // 在评分器里成立。（取消发生在阶段循环内时走前面的逐阶段补全，
+        // 两条路径由 cancelled 标志互斥，不会重复。）
+        if (!cancelled && isCancelled?.invoke() == true) {
+            cancelled = true
+            val cancelEv = Evidence(
+                id = "Z.CANCELLED",
+                category = Category.CROSSCHECK,
+                severity = Severity.MEDIUM,
+                confidence = Confidence.HIGH,
+                verdict = Verdict.UNKNOWN,
+                state = EvidenceState.SKIPPED,
+                title = "扫描被用户取消（收尾阶段）",
+                detail = "Java 阶段已全部执行，取消发生在跨进程探针/收尾阶段",
+                fpNote = "取消是主动行为，不代表设备状态异常",
+            )
+            items += cancelEv
+            onItem?.invoke(
+                cancelEv.id, cancelEv.title, cancelEv.severity.name,
+                cancelEv.verdict.name, cancelEv.category.code,
+            )
+        }
+
         // ---------------------------------------------------------- 评分
         // ★ crosses 必须传进去：
         //   之前固定传 emptyList()，导致 CROSSCHECK_BONUS 在真实路径里从未生效，
@@ -410,6 +439,7 @@ class DetectorEngine(private val context: Context) {
             nativeError = nativeError,
             elapsedMs = System.currentTimeMillis() - start,
             nativeVersion = nativeVersion,
+            crosses = nativeCrosses.toList(),
         )
     }
 

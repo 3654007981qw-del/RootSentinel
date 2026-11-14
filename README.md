@@ -35,14 +35,19 @@ Android Root 环境检测器 —— Kotlin / Jetpack Compose UI + C++ NDK 检测
 环境：JDK 17、Android SDK（platform 36）、NDK 27、CMake 3.22+。
 
 ```bash
+# 0) 先导出签名凭据（只走环境变量，绝不写进任何文件 —— 包括
+#    gradle.properties，它是被 git 跟踪的，写进去等于公开密码）
+export RS_KS_PATH=/path/to/rs.jks RS_KS_PASS=*** RS_KS_ALIAS=*** RS_KEY_PASS=***
+
 # 1) 构建 native 库（双路线：有 NDK 时走 CMake，ARM64 主机走系统 clang 直编）
-#    签名基线会自动注入：环境变量 RS_SIGNER_SHA256，
-#    或由 RS_KS_PATH / RS_KS_ALIAS / RS_KS_PASS 指向的 keystore 派生；
-#    缺失时会明确警告（I.APK_SIGNATURE 将为 UNKNOWN）。
+#    签名基线在此步注入：环境变量 RS_SIGNER_SHA256，
+#    或由上面的 RS_KS_* 指向的 keystore 派生。顺序不能反 ——
+#    先跑 native.sh 再 export 的话，.so 里没有基线，
+#    I.APK_SIGNATURE 将为 UNKNOWN；缺失基线时 native.sh 直接报错退出
+#    （仅本地调试可加 RS_ALLOW_NO_SIGNER=1 放行）。
 ./native.sh
 
-# 2) 打包（签名凭据同样走环境变量，不写进任何文件）
-export RS_KS_PATH=/path/to/rs.jks RS_KS_PASS=*** RS_KS_ALIAS=*** RS_KEY_PASS=***
+# 2) 打包
 ./gradlew assembleRelease
 ```
 

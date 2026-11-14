@@ -215,23 +215,69 @@ class SafetyNetDetector(private val context: Context) {
         val kpg = KeyPairGenerator.getInstance(
             KeyProperties.KEY_ALGORITHM_EC, "AndroidKeyStore")
 
-        val spec = KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_SIGN)
-            .setDigests(KeyProperties.DIGEST_SHA256)
-            .build()
-        kpg.initialize(spec)
-        kpg.generateKeyPair()
+        // v2.22.43 修正：之前从不调用 setIsStrongBoxBacked(true)，
+        // 生成的一直是普通（TEE）密钥 —— 本项 PASS 只能证明
+        // AndroidKeyStore 可用，证明不了 StrongBox。现在设备声明
+        // StrongBox 特性时真正按 StrongBox 生成；StrongBox 临时
+        // 不可用（StrongBoxUnavailableException）时退回 TEE 并如实标注。
+        var strongBoxBacked = false
+        if (hasStrongBox && Build.VERSION.SDK_INT >= 28) {
+            try {
+                val sbSpec = KeyGenParameterSpec.Builder(
+                    alias, KeyProperties.PURPOSE_SIGN)
+                    .setDigests(KeyProperties.DIGEST_SHA256)
+                    .setIsStrongBoxBacked(true)
+                    .build()
+                kpg.initialize(sbSpec)
+                kpg.generateKeyPair()
+                strongBoxBacked = true
+            } catch (e: android.security.keystore.StrongBoxUnavailableException) {
+                val teeSpec = KeyGenParameterSpec.Builder(
+                    alias, KeyProperties.PURPOSE_SIGN)
+                    .setDigests(KeyProperties.DIGEST_SHA256)
+                    .build()
+                kpg.initialize(teeSpec)
+                kpg.generateKeyPair()
+            }
+        } else {
+            val spec = KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_SIGN)
+                .setDigests(KeyProperties.DIGEST_SHA256)
+                .build()
+            kpg.initialize(spec)
+            kpg.generateKeyPair()
+        }
 
         val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         val cert = ks.getCertificate(alias)
         runCatching { ks.deleteEntry(alias) }
 
         if (cert != null) {
-            ev("G.STRONGBOX", Severity.INFO, Verdict.PASS,
-                "AndroidKeyStore 可用", Confidence.HIGH,
-                cat = Category.ATTESTATION,
-                vec = listOf("strongbox=$hasStrongBox",
-                             "certLen=${cert.encoded?.size ?: 0}"),
-                detail = "硬件密钥可用是 Key Attestation 的前提")
+            when {
+                strongBoxBacked -> ev(
+                    "G.STRONGBOX", Severity.INFO, Verdict.PASS,
+                    "StrongBox 可用（密钥按 StrongBox 生成）", Confidence.HIGH,
+                    cat = Category.ATTESTATION,
+                    vec = listOf("strongbox=true", "strongboxBacked=true",
+                                 "certLen=${cert.encoded?.size ?: 0}"),
+                    detail = "硬件密钥可用是 Key Attestation 的前提")
+                hasStrongBox -> ev(
+                    "G.STRONGBOX", Severity.INFO, Verdict.PASS,
+                    "AndroidKeyStore 可用（StrongBox 生成失败，已退回 TEE）",
+                    Confidence.MEDIUM,
+                    cat = Category.ATTESTATION,
+                    vec = listOf("strongbox=true", "strongboxBacked=false",
+                                 "certLen=${cert.encoded?.size ?: 0}"),
+                    detail = "设备声明 StrongBox 特性，但 StrongBox 密钥生成" +
+                        "不可用，本次仅以 TEE 密钥验证了 KeyStore 链路")
+                else -> ev(
+                    "G.STRONGBOX", Severity.INFO, Verdict.PASS,
+                    "AndroidKeyStore 可用（设备无 StrongBox 特性）",
+                    Confidence.HIGH,
+                    cat = Category.ATTESTATION,
+                    vec = listOf("strongbox=false", "strongboxBacked=false",
+                                 "certLen=${cert.encoded?.size ?: 0}"),
+                    detail = "硬件密钥可用是 Key Attestation 的前提")
+            }
         } else {
             ev("G.STRONGBOX", Severity.MEDIUM, Verdict.HIT,
                 "生成的密钥无证书", Confidence.MEDIUM,

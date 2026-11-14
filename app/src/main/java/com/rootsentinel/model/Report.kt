@@ -324,7 +324,13 @@ object ScoringModel {
             // else -> ROOT，单条 G.CROSS_PROC（CRITICAL=40 分）就能
             // 凑满 ROOTED 阈值，把 Hook 风险误判成 Root 风险。
             e.category == Category.CROSSCHECK -> Dimension.HOOK
-            // A / C / H 类默认归 ROOT（root 方案痕迹、挂载篡改、隐藏痕迹）
+            // H 类（隐藏与欺骗痕迹）证明的是「观测通道被干扰」，归 HOOK。
+            // v2.22.43 修正：之前没有这一分支，H 类掉进 else -> ROOT，
+            // analyze.cpp 启发式生成的 H.HIDING_SIGNAL（源自交叉验证矛盾 /
+            // 过度隐藏）会直接污染 rootScore，甚至单独凑满 ROOTED_HIDING
+            // 的 hasHiding 门槛之外的分数部分。现在与 CROSSCHECK 同路。
+            e.category == Category.HIDING -> Dimension.HOOK
+            // A / C 类默认归 ROOT（root 方案痕迹、挂载篡改）
             else -> Dimension.ROOT
         }
     }
@@ -394,7 +400,11 @@ object ScoringModel {
         }
 
         // ---- UNKNOWN：细分原因
-        val blob = (e.title + " " + e.detail + " " + e.fpNote).lowercase()
+        // v2.22.43 修正：之前把 fpNote 也拼进匹配文本。fpNote 是
+        // 「误报说明」，里面天然会出现「不存在 / 权限不足」等词，
+        // 会把真实命中的证据误判成 NOT_APPLICABLE，缩小覆盖率分母、
+        // 虚增覆盖率。现在只看标题与结论详情。
+        val blob = (e.title + " " + e.detail).lowercase()
 
         // 系统明确不支持
         val notSupported = listOf(
@@ -469,7 +479,12 @@ object ScoringModel {
                     best[e.id] = e
                     continue
                 }
-                // 取更严重的一条：HIT > UNKNOWN > PASS；同 verdict 取更严重的 severity
+                // 取更严重的一条，全序比较（顺序无关）：
+                // 状态 > severity 权重 > confidence > 非启发式优先。
+                // v2.22.43 修正：之前 rank 只含状态与 severity.ordinal，
+                // 同 ID 同严重度时保留「先到的一条」，而 DetectorEngine 的
+                // 阶段顺序是 shuffled 的 —— 同一台设备两次扫描可能选出
+                // 不同证据、算出不同分数。现在同 ID 永远选同一条。
                 val rank = { x: Evidence ->
                     val v = when (x.effectiveState) {
                         EvidenceState.HIT -> 3
@@ -477,7 +492,9 @@ object ScoringModel {
                         EvidenceState.SKIPPED, EvidenceState.UNKNOWN -> 1
                         EvidenceState.PASS -> 0
                     }
-                    v * 10 + x.severity.ordinal
+                    v * 100_000 + x.severity.weight * 100 +
+                        (x.confidence.multiplier * 100).toInt() -
+                        (if (x.heuristic) 50 else 0)
                 }
                 if (rank(e) > rank(prev)) best[e.id] = e
             }
@@ -661,7 +678,12 @@ object ScoringModel {
         if (coverage < 0.6 && total > 0.0) {
             val factor = 0.5 + coverage * 0.5
             val before = total
-            total *= factor
+            // v2.22.43 修正：之前只折扣 total，hard/soft 不变，
+            // 于是 rootScore != hardScore + softScore，分项对不上总分。
+            // 现在同比例折扣三者，保持 rootScore == hard + soft。
+            hard *= factor
+            soft *= factor
+            total = hard + soft
             notes += "可读率仅 ${(coverage * 100).toInt()}%，总分已按 ×" +
                 String.format("%.2f", factor) + " 折扣（" +
                 String.format("%.1f", before) + " → " + String.format("%.1f", total) + "）"
@@ -724,8 +746,12 @@ object ScoringModel {
                 (it.confidence == Confidence.HIGH || it.confidence == Confidence.VERIFIED) &&
                 it.severity.weight >= Severity.MEDIUM.weight
         }
+        // v2.22.43 修正：之前只看强命中数量，可读率 0.3 也能给出
+        // HIGH 置信度，与上方注释承诺的「与可读率共同决定」不符。
+        // 现在低可读率直接封顶整体置信度。
         val conf = when {
-            strong >= 3 -> Confidence.HIGH
+            coverage < 0.6 -> Confidence.LOW
+            strong >= 3 && coverage >= 0.8 -> Confidence.HIGH
             strong >= 1 -> Confidence.MEDIUM
             else -> Confidence.LOW
         }

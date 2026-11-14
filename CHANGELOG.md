@@ -1,5 +1,42 @@
 # Changelog
 
+## 2.22.43
+
+基于对 2.22.42 的第三份独立静态审查（5 条 P1 + 8 条 P2 + 风险表，经逐条复核：11 条属实，P1-04 / P2-08 各有一处结论需修正，§五时间检测"仅 30 次样本"的说法有误——实际为 64 轮取中位数）修复：
+
+**P1-01 H 类证据维度污染**
+- `dimensionOf()` 新增 HIDING 分支：H 类（隐藏与欺骗痕迹）归 HOOK（观测完整性）维度，不再掉进默认的 ROOT。analyze.cpp 由交叉验证矛盾启发式生成的 H.HIDING_SIGNAL 从此只进 hookScore，不再直接污染 rootScore / 凑 ROOTED_HIDING 的分数部分（定级的 hasHiding 门槛仍按类别判定，不变）。
+
+**P1-02 证据去重顺序依赖**
+- 去重 rank 改为全序：状态 > severity 权重 > confidence（VERIFIED> HIGH > MEDIUM > LOW）> 非启发式优先。之前同 ID 同严重度时保留先到的一条，而阶段顺序是 shuffled 的——同一设备两次扫描可算出不同分数。现在同 ID 永远选同一条。
+
+**P1-03 取消按钮不真正取消**
+- MainActivity 现在把 `isCancelled` 真正接进引擎（新增 `ScanState.cancelRequested`）；取消只置标志，`scanning` 保持 true 直到引擎返回，不再出现"旧扫描在后台继续跑、UI 却允许开新一轮"。引擎收尾再补查一次取消：在最后一个阶段之后才取消的，也会落 Z.CANCELLED 并强制 INCOMPLETE。
+
+**P1-04 构建文档顺序与死配置**
+- README 改为先 export 签名凭据、再跑 native.sh（顺序反了 .so 没有签名基线）。native.sh 缺失基线由"只警告"改为默认直接报错退出（本地调试可用 RS_ALLOW_NO_SIGNER=1 放行）。审查所说"Gradle 没有 externalNativeBuild 配置"不准确：build.gradle.kts 里有两处，但因无顶层 cmake path 属死配置，实际打包走 jniLibs 预置库——文档口径已按此澄清。已交付的 APK 走手工管线、基线经核对在 .so 内，不受影响。
+
+**P1-05 凭据卫生**
+- 根目录 gradle.properties 中由旧文档引导写入的 RS_KS_PASS 行已删除，文件改为不入库（.gitignore 已覆盖），新增 gradle.properties.example 模板；BUILD-GRADLE.md 改为只教环境变量 / 仓库外 ~/.gradle 两种方式。若被删的那行曾是真实 keystore 密码，请按"已公开"处理并轮换——git 历史里仍有该文件的旧版本，本版无法改写历史。
+
+**P2 修正**
+- P2-01 适用性判定不再把 fpNote（误报说明）拼进关键词匹配，避免真实证据被误判 NOT_APPLICABLE 缩小覆盖率分母。
+- P2-02 覆盖率折扣同比例作用于 hard/soft/total，保持 rootScore == hardScore + softScore；整体置信度真正计入可读率（coverage < 0.6 封顶 LOW）。
+- P2-03 X.TCP_LISTEN 标题改"本机网络命名空间存在本地监听端口"，与自己的 fp_note 口径一致（/proc/net 是命名空间级视图）。
+- P2-04 C.MOUNT_MULTI 补反方向比对：mounts 有而 mountinfo 没有的挂载点同样判不一致。
+- P2-05 G.STRONGBOX 真正调用 setIsStrongBoxBacked(true) 生成 StrongBox 密钥；StrongBox 临时不可用时退回 TEE 并在标题/向量中如实标注，不再把"KeyStore 可用"冒充 StrongBox 通过。
+- P2-06 JSON 导出：MediaStore 写入失败会删除 IS_PENDING 占位记录，不再留 0 字节幽灵条目；API 26–28 写公共目录失败时退回应用专属外部目录。
+- P2-07 JSON 导出补齐：nativeVersion、证据 state 与 dimension、四维分数（root/hook/integrity/environment）、integrityBreach、crosses 明细——拿到导出文件可完整复算评分。
+- P2-08 仓库 jniLibs 的 .so 改为 strip 后再入库（native.sh 产物在打包时由管线 strip，此前仓库里的预置库未 strip；已交付 APK 内的 .so 一直是 strip 过的，不受影响）。
+
+**P3 落地项**
+- 移除未使用的 INTERNET 权限（全仓无外网调用，仅有 127.0.0.1 回环探测与网卡枚举，均不需要该权限）。
+- JSON 导出的设备段不再含完整 Build 指纹，改为 fingerprintSha256 摘要（同构建可比对，不泄露确切构建串）。
+- 审查提及的设置项无消费者、Attestation 双实现统一、测试缺失等问题已确认属实，属结构性后续项，本版未动（Attestation 统一 Provider 沿用 2.22.42 的延期结论）。
+
+验证：Native 三 ABI 全量编译通过；Kotlin 全量编译 0 错误；交付 APK 通过全量 dex 类审计（管线既定出厂门槛）。
+
+
 ## 2.22.42
 
 基于对 2.22.41 的第二份独立静态审查（3 条 P1 + 4 条 P2，全部经逐条复核属实）修复：

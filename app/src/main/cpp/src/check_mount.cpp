@@ -82,14 +82,31 @@ void checkMount(ScanReport& r) {
             ++mismatch;
         }
     }
-    if (mismatch > 0) {
+    // v2.22.43：反方向也要比。之前只查 mountinfo→mounts，
+    // mounts 里多出、mountinfo 里没有的挂载点完全看不见 ——
+    // 隐藏方案把条目从 mountinfo 摘掉时恰好走这个方向。
+    size_t extra = 0;
+    std::string firstExtra;
+    for (const auto& p : fromMounts) {
+        bool found = false;
+        for (const auto& m : fromMountinfo) {
+            if (m.point == p) { found = true; break; }
+        }
+        if (!found) {
+            if (extra == 0) firstExtra = p;
+            ++extra;
+        }
+    }
+    if (mismatch > 0 || extra > 0) {
         Evidence e = makeHit(RSs("C.MOUNT_MULTI"), Category::MOUNT,
                              Severity::HIGH, Confidence::HIGH,
                              RSs("mountinfo 与 mounts 不一致"));
         e.addVector(RSs("mountinfo"), std::to_string(fromMountinfo.size()));
         e.addVector(RSs("mounts"), std::to_string(fromMounts.size()));
         e.addVector(RSs("missing_in_mounts"), std::to_string(mismatch));
-        e.addVector(RSs("first"), firstDiff);
+        e.addVector(RSs("extra_in_mounts"), std::to_string(extra));
+        if (mismatch > 0) e.addVector(RSs("first"), firstDiff);
+        if (extra > 0) e.addVector(RSs("first_extra"), firstExtra);
         e.detail = RSs("有挂载被从其中一个视图里摘掉");
         r.add(std::move(e));
     } else {

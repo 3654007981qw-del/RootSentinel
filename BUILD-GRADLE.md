@@ -53,8 +53,12 @@ Gradle 就会优先用这个本地 artifact。
 # 1. 一次性准备（arm64 主机才需要）
 sh setup-aapt2.sh
 
-# 2. 签名密码（不要提交）
-echo 'RS_KS_PASS=<你的密码>' >> gradle.properties
+# 2. 签名密码（只走环境变量）
+#    ⚠️ 不要把密码写进项目根目录的 gradle.properties —— 该文件被
+#    git 跟踪，写进去再提交等于把 keystore 密码公开（v2.22.43 前
+#    本文档曾这样教，是错的）。二选一：
+export RS_KS_PASS='<你的密码>'            # 当前 shell 会话
+#    或写到仓库外的 ~/.gradle/gradle.properties（Gradle 用户级配置，不入库）
 
 # 3. 编译
 ./gradlew :app:assembleRelease

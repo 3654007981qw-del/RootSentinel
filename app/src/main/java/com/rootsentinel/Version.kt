@@ -8,6 +8,6 @@ package com.rootsentinel
  * 而 Compose 里拿 BuildConfig 需要 buildFeatures.buildConfig = true。
  */
 object RootSentinelVersion {
-    const val NAME = "2.22.42"
-    const val CODE = 22242
+    const val NAME = "2.22.43"
+    const val CODE = 22243
 }

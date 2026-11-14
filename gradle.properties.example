@@ -1,0 +1,11 @@
+# 复制为 gradle.properties 后按需调整。
+# gradle.properties 本身不入库：它可能被写入签名密码等凭据
+# （凭据优先走环境变量 RS_KS_* 或仓库外的 ~/.gradle/gradle.properties）。
+org.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8
+org.gradle.parallel=true
+org.gradle.workers.max=4
+org.gradle.daemon=true
+android.useAndroidX=true
+android.nonTransitiveRClass=true
+kotlin.code.style=official
+android.experimental.disableCompileSdkChecks=true

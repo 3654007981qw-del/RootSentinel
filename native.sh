@@ -341,6 +341,7 @@ build_with_clang() {
 
     mkdir -p "$OUT_BASE/$ABI"
     cp -f "$OUT/librootsentinel.so" "$OUT_BASE/$ABI/librootsentinel.so"
+    strip_so "$OUT_BASE/$ABI/librootsentinel.so"
     echo "[native] $ABI OK → $(ls -l "$OUT_BASE/$ABI/librootsentinel.so" | awk '{print $5}') 字节"
     return 0
 }
@@ -363,7 +364,14 @@ build_with_cmake() {
     local SIGNER_ARGS=()
     [ -n "${RS_SIGNER_SHA256:-}" ] && SIGNER_ARGS=(-DRS_SIGNER_SHA256="$RS_SIGNER_SHA256")
 
-    "$CMAKE_BIN" -S "$CPP_DIR" -B "$BUILD_DIR" "${GEN_ARGS[@]}" "${SIGNER_ARGS[@]}" \
+    # v2.22.43：armeabi-v7a 必须显式 ARM 模式。默认 Thumb 模式下 R7 是
+    # 保留寄存器，syscall_asm.cpp 的内联汇编直接编译失败
+    # （write to reserved register 'R7'）—— 之前的仓库构建一直靠
+    # 外部管线手工补这个参数，native.sh 自己跑不通 v7a。
+    local ARM_ARGS=()
+    [ "$ABI" = "armeabi-v7a" ] && ARM_ARGS=(-DANDROID_ARM_MODE=arm)
+
+    "$CMAKE_BIN" -S "$CPP_DIR" -B "$BUILD_DIR" "${GEN_ARGS[@]}" "${SIGNER_ARGS[@]}" "${ARM_ARGS[@]}" \
         -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
         -DANDROID_ABI="$ABI" \
         -DANDROID_PLATFORM="android-$API_LEVEL" \
@@ -387,8 +395,29 @@ build_with_cmake() {
 
     mkdir -p "$OUT_BASE/$ABI"
     cp -f "$SO" "$OUT_BASE/$ABI/librootsentinel.so"
+    strip_so "$OUT_BASE/$ABI/librootsentinel.so"
     echo "[native] $ABI OK → $(ls -l "$OUT_BASE/$ABI/librootsentinel.so" | awk '{print $5}') 字节"
     return 0
+}
+
+# v2.22.43：入库的 .so 一律 strip（审查 P2-08）。之前仓库里的
+# 预置库带完整符号表 —— 体积白白放大，内部符号名也全部暴露。
+# 找不到 llvm-strip 时只警告不失败（打包管线侧还会再 strip 一次）。
+strip_so() {
+    local so="$1"
+    local s=""
+    s="$(command -v llvm-strip 2>/dev/null || true)"
+    if [ -z "$s" ]; then
+        for base in "${ANDROID_NDK_HOME:-}" "${ANDROID_NDK_ROOT:-}" "${NDK:-}"; do
+            [ -n "$base" ] && [ -x "$base/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" ] && \
+                s="$base/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" && break
+        done
+    fi
+    if [ -n "$s" ]; then
+        "$s" "$so" 2>/dev/null || echo "[native] 警告：strip 失败：$so" >&2
+    else
+        echo "[native] 警告：未找到 llvm-strip，.so 未 strip：$so" >&2
+    fi
 }
 
 # ================================================================
@@ -416,8 +445,14 @@ if [ -z "${RS_SIGNER_SHA256:-}" ] && [ -n "${RS_KS_PATH:-}" ] && [ -n "${RS_KS_A
 fi
 if [ -n "${RS_SIGNER_SHA256:-}" ]; then
     echo "[native] 签名基线已注入 (SHA-256 前 8 位: ${RS_SIGNER_SHA256:0:8})"
+elif [ "${RS_ALLOW_NO_SIGNER:-}" = "1" ]; then
+    echo "[native] 警告：未提供签名基线，本次构建的 I.APK_SIGNATURE 将为 UNKNOWN（RS_ALLOW_NO_SIGNER=1，仅限本地调试）" >&2
 else
-    echo "[native] 警告：未提供签名基线（RS_SIGNER_SHA256 / RS_KS_PATH 均未设置），本次构建的 I.APK_SIGNATURE 将为 UNKNOWN" >&2
+    # v2.22.43：之前只警告不中断，照样产出无基线的 .so，
+    # 装机后 I.APK_SIGNATURE 恒为 UNKNOWN。现在默认直接失败，
+    # 先按 README 第 0 步 export RS_KS_* 或 RS_SIGNER_SHA256 再构建。
+    echo "[native] 错误：未提供签名基线（RS_SIGNER_SHA256 / RS_KS_PATH 均未设置），拒绝构建无基线的 .so。仅本地调试可加 RS_ALLOW_NO_SIGNER=1 放行。" >&2
+    exit 1
 fi
 export RS_SIGNER_SHA256
 

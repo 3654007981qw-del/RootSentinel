@@ -27,6 +27,8 @@ void checkArtifacts(ScanReport& r) {
     };
 
     bool found = false;
+    bool eaccesOnly = false;
+    std::string eaccesPath;
     for (const auto& p : paths) {
         const bool existsRaw  = fileExistsRaw(p);
         const int  facc       = accessState(p, R_OK);
@@ -34,6 +36,14 @@ void checkArtifacts(ScanReport& r) {
 
         // 三视角任一命中即记录；视角之间的差异本身也是证据
         if (!existsRaw && !existsLibc && facc == 2) continue;
+
+        // v2.22.43：仅 faccessat 返回 EACCES、statx 与 libc 视角都未确认
+        // 存在时，不再判 HIT。EACCES 也可能来自父目录的遍历限制，
+        // 与 v2.22.42 对 Magisk 方案路径的口径一致：EACCES-only → UNKNOWN。
+        if (!existsRaw && !existsLibc && facc == 1) {
+            if (!eaccesOnly) { eaccesOnly = true; eaccesPath = p; }
+            continue;
+        }
 
         found = true;
         const bool disagrees = (existsRaw != existsLibc) || (facc == 1);
@@ -57,8 +67,20 @@ void checkArtifacts(ScanReport& r) {
         r.add(std::move(e));
     }
     if (!found) {
-        r.add(makePass(RSs("A.SU_PATH"), Category::ARTIFACT,
-                       RSs("13 条经典 su 路径在所有视角下均不可见")));
+        if (eaccesOnly) {
+            Evidence e = makeUnknown(RSs("A.SU_PATH"), Category::ARTIFACT,
+                                     Severity::MEDIUM,
+                                     RSs("su 路径被拒绝访问，无法确认存在: ") + eaccesPath);
+            e.addVector(RSs("faccessat"), RSs("EACCES"));
+            e.addVector(RSs("statx"), RSs("absent"));
+            e.addVector(RSs("libc_access"), RSs("absent"));
+            e.detail = RSs("只有 faccessat 一个视角给出 EACCES，"
+                           "其余视角均未确认文件存在，不足以判定命中");
+            r.add(std::move(e));
+        } else {
+            r.add(makePass(RSs("A.SU_PATH"), Category::ARTIFACT,
+                           RSs("13 条经典 su 路径在所有视角下均不可见")));
+        }
     }
 
     // ---------------------------------------------------------- /data/adb

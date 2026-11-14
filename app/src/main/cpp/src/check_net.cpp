@@ -95,16 +95,19 @@ void checkNet(ScanReport& r) {
     {
         if (all.empty()) {
             r.add(makePass(RSs("X.TCP_LISTEN"), Category::CROSSCHECK,
-                           RSs("本进程无本地监听端口")));
+                           RSs("本机网络命名空间无本地监听端口")));
         } else {
             std::vector<std::string> list;
             for (const auto& lp : all) {
                 if (list.size() >= 8) break;
                 list.push_back(lp.proto + RSs(":") + std::to_string(lp.port));
             }
+            // v2.22.43 文案修正：/proc/net/tcp* 是网络命名空间级视图，
+            // 端口不一定是本进程开的。旧标题「本进程持有」与本项自己的
+            // fp_note 自相矛盾，现与 fp_note 口径一致。
             Evidence e = makeHit(RSs("X.TCP_LISTEN"), Category::CROSSCHECK,
                                  Severity::LOW, Confidence::LOW,
-                                 RSs("本进程持有本地监听端口"));
+                                 RSs("本机网络命名空间存在本地监听端口"));
             e.addVector(RSs("count"), std::to_string(all.size()));
             for (const auto& s : list) e.addVector(RSs("listen"), s);
             e.fp_note = RSs("这些端口属于整个网络命名空间，不一定是本进程开的");

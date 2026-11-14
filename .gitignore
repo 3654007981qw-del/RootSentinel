@@ -1,5 +1,7 @@
 # 本地环境（路径因机器而异，不入库）
 local.properties
+# 可能含签名密码等凭据，绝不入库（凭据走环境变量或 ~/.gradle/）
+gradle.properties
 # 构建产物
 .gradle/
 build/
@@ -12,3 +14,4 @@ app/src/main/cpp/.cxx/
 *.jks
 *.keystore
 *.kspass
+.native-build/
