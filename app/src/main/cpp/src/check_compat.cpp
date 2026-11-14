@@ -178,13 +178,17 @@ void checkCompat(ScanReport& r) {
                             : (fb ? RSs("fallback") : RSs("native")));
         }
 
-        e.addVector(RSs("apex"), accessState(RSs("/apex"), 4) == 0 ? "1" : "0");
-        e.addVector(RSs("debug_ramdisk"),
-                    accessState(RSs("/debug_ramdisk"), 4) == 0 ? "1" : "0");
-        e.addVector(RSs("system_ext"),
-                    accessState(RSs("/system_ext"), 4) == 0 ? "1" : "0");
-        e.addVector(RSs("pstore"),
-                    accessState(RSs("/sys/fs/pstore"), 4) == 0 ? "1" : "0");
+        // v2.22.45（审查 A P2-17）：旧写法用 R_OK 可读性代指「存在」，
+        // 目录存在但不可读会被报成 0（缺失）。改为三态：
+        // 1=存在且可读，exists=存在但不可读，0=不存在。
+        auto dirState = [](const std::string& p) -> std::string {
+            if (accessState(p, 4) == 0) return "1";
+            return fileExistsRaw(p) ? "exists" : "0";
+        };
+        e.addVector(RSs("apex"), dirState(RSs("/apex")));
+        e.addVector(RSs("debug_ramdisk"), dirState(RSs("/debug_ramdisk")));
+        e.addVector(RSs("system_ext"), dirState(RSs("/system_ext")));
+        e.addVector(RSs("pstore"), dirState(RSs("/sys/fs/pstore")));
         e.addVector(RSs("proc_tainted_readable"),
                     readFile(RSs("/proc/sys/kernel/tainted"), 4096).empty() ? "0" : "1");
 

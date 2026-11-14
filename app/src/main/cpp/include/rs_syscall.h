@@ -78,8 +78,11 @@ enum : long {
     NR_faccessat        = 334,
     NR_faccessat2       = 439,
     NR_readlinkat       = 332,
-    NR_fstatat          = 327,
-    NR_fstat            = 108,
+    // v2.22.45（审查 B P2-01）：Bionic 的 struct stat 在所有架构上都是
+    // STAT64 布局，ARM32 必须用 fstat64(197)/fstatat64(268) 与之配对；
+    // 旧值 108/327 写的是旧式 struct stat，会把元数据写错位。
+    NR_fstatat          = 268,
+    NR_fstat            = 197,
     NR_statx            = 397,
     NR_getdents64       = 217,
     NR_statfs           = 99,

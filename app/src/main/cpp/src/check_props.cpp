@@ -145,7 +145,10 @@ void checkProps(ScanReport& r) {
 
     // 属性全量扫描（getprop 输出需要 Java 侧配合，这里只查关键几个）
     static const std::vector<std::string> suspects = {
-        RSs("ro.kernel.qemu"), RSs("ro.boot.ksu"),
+        // v2.22.45（审查 A P0-3）：ro.kernel.qemu 是模拟器标记，不是
+        // root 证据，已由 check_emulator 在模拟器语境单独检查，从本
+        // 列表移除，避免在模拟器上污染 Root 结论。
+        RSs("ro.boot.ksu"),
         RSs("ro.kernelsu.version"), RSs("ro.magisk.version"),
     };
     for (const auto& s : suspects) {
@@ -160,24 +163,26 @@ void checkProps(ScanReport& r) {
     }
 
     // ---------------------------------------------------------- 一.5 uname 多源
+    // v2.22.45（审查 A P1-14 附带收口）：旧实现同 ID B.UNAME_MULTI
+    // 产出两条 PASS，评分器去重时只能留一条、另一条的向量被丢弃。
+    // 现在合并为一条证据，两个来源的观测都进 vectors。
     struct utsname u{};
     std::string unameRelease;
+    Evidence multi = makePass(RSs("B.UNAME_MULTI"), Category::PROPERTY,
+                              RSs("uname 多源可读"));
+    bool multiAny = false;
     if (uname(&u) == 0) {
         unameRelease = u.release;
-        Evidence e = makePass(RSs("B.UNAME_MULTI"), Category::PROPERTY,
-                              RSs("uname(2) 可调用"));
-        e.addVector(RSs("release"), u.release);
-        e.addVector(RSs("version"), u.version);
-        e.addVector(RSs("machine"), u.machine);
-        r.add(std::move(e));
+        multi.addVector(RSs("release"), u.release);
+        multi.addVector(RSs("version"), u.version);
+        multi.addVector(RSs("machine"), u.machine);
+        multiAny = true;
     }
 
     const std::string osrel = readFile(RSs("/proc/sys/kernel/osrelease"));
     if (!osrel.empty()) {
-        Evidence e = makePass(RSs("B.UNAME_MULTI"), Category::PROPERTY,
-                              RSs("osrelease 可读"));
-        e.addVector(RSs("osrelease"), trim(osrel));
-        r.add(std::move(e));
+        multi.addVector(RSs("osrelease"), trim(osrel));
+        multiAny = true;
 
         if (!unameRelease.empty() && trim(osrel) != unameRelease) {
             Evidence c = makeHit(RSs("B.UNAME_MISMATCH"), Category::CROSSCHECK,
@@ -189,6 +194,7 @@ void checkProps(ScanReport& r) {
             r.add(std::move(c));
         }
     }
+    if (multiAny) r.add(std::move(multi));
 }
 
 }  // namespace rs

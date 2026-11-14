@@ -577,7 +577,6 @@ object ScoringModel {
         }
 
         var total = hard + soft
-        val totalItems = deduped.size + crosses.size
 
         // ---------------------------------------------------------- 设备能力感知分母
         //

@@ -49,24 +49,62 @@ void checkThreads(ScanReport& r) {
         }
     }
 
-    if (nTask <= 0 || nStatus <= 0) {
-        r.add(makeUnknown(RSs("D.TASK_COUNT"), Category::MEMORY, Severity::LOW,
-                          RSs("线程枚举不可用")));
-    } else if (nTask == nStatus) {
-        Evidence e = makePass(RSs("D.TASK_COUNT"), Category::MEMORY,
-                              RSs("线程枚举与 status 一致"));
-        e.addVector(RSs("task_dir"), std::to_string(nTask));
-        e.addVector(RSs("status"), std::to_string(nStatus));
-        r.add(std::move(e));
-    } else {
-        Evidence e = makeHit(RSs("D.TASK_COUNT"), Category::CROSSCHECK,
-                             Severity::HIGH, Confidence::HIGH,
-                             RSs("线程枚举与 status 字段不一致"));
-        e.addVector(RSs("task_dir"), std::to_string(nTask));
-        e.addVector(RSs("status"), std::to_string(nStatus));
-        e.detail = RSs("两视角线程数不同 → 有线程从 getdents 中被摘除");
-        e.fp_note = RSs("极少数内核在任务刚创建/销毁瞬间会有 ±1 的瞬时差异");
-        r.add(std::move(e));
+    // v2.22.45（审查 A P1-9）：getdents 与 status 不是原子快照，线程
+    // 创建/退出瞬间 ±1 很常见，旧实现差 1 即 HIGH HIT。现：差 <=1 按
+    // 瞬时差异处理；差 >=2 先重采样一次，两次都差 >=2 才判 HIT。
+    bool decided = false;
+    if (nTask > 0 && nStatus > 0 &&
+        (nTask - nStatus >= 2 || nStatus - nTask >= 2)) {
+        int nTask2 = 0;
+        for (const auto& d : listDirRaw(RSs("/proc/self/task"))) {
+            if (isDigits(d.name)) ++nTask2;
+        }
+        int nStatus2 = 0;
+        const auto st2 = readFile(RSs("/proc/self/status"), 64 * 1024);
+        for (const auto& line : split(st2, '\n')) {
+            if (startsWith(line, RSs("Threads:"))) {
+                nStatus2 = std::atoi(line.c_str() + 8);
+                break;
+            }
+        }
+        if (nTask2 > 0 && nStatus2 > 0 &&
+            (nTask2 - nStatus2 >= 2 || nStatus2 - nTask2 >= 2)) {
+            Evidence e = makeHit(RSs("D.TASK_COUNT"), Category::CROSSCHECK,
+                                 Severity::HIGH, Confidence::HIGH,
+                                 RSs("线程枚举与 status 字段持续不一致"));
+            e.addVector(RSs("task_dir"), std::to_string(nTask2));
+            e.addVector(RSs("status"), std::to_string(nStatus2));
+            e.detail = RSs("两次采样两视角线程数都差 >=2 → 有线程从 getdents 中被摘除");
+            r.add(std::move(e));
+            decided = true;
+        } else if (nTask2 > 0 && nStatus2 > 0) {
+            nTask = nTask2;
+            nStatus = nStatus2;
+        }
+    }
+
+    if (!decided) {
+        if (nTask <= 0 || nStatus <= 0) {
+            r.add(makeUnknown(RSs("D.TASK_COUNT"), Category::MEMORY,
+                              Severity::LOW, RSs("线程枚举不可用")));
+        } else if (nTask == nStatus || nTask - nStatus == 1 ||
+                   nStatus - nTask == 1) {
+            Evidence e = makePass(RSs("D.TASK_COUNT"), Category::MEMORY,
+                                  nTask == nStatus
+                                      ? RSs("线程枚举与 status 一致")
+                                      : RSs("线程枚举与 status 差 1（瞬时差异）"));
+            e.addVector(RSs("task_dir"), std::to_string(nTask));
+            e.addVector(RSs("status"), std::to_string(nStatus));
+            r.add(std::move(e));
+        } else {
+            Evidence e = makeHit(RSs("D.TASK_COUNT"), Category::CROSSCHECK,
+                                 Severity::HIGH, Confidence::HIGH,
+                                 RSs("线程枚举与 status 字段不一致"));
+            e.addVector(RSs("task_dir"), std::to_string(nTask));
+            e.addVector(RSs("status"), std::to_string(nStatus));
+            e.detail = RSs("两视角线程数不同 → 有线程从 getdents 中被摘除");
+            r.add(std::move(e));
+        }
     }
 
     // ---------------------------------------------------------- D.THREAD_NAME

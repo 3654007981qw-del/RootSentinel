@@ -81,6 +81,31 @@ void checkPltHooks(ScanReport& r) {
     }
 
     if (!hooked.empty()) {
+        // v2.22.45（审查 A P1-10）：bionic 里 open / stat 本身就是跳到
+        // openat / fstatat 的 alias 包装，入口是跳转指令属正常。旧实现
+        // 只在 fp_note 里承认却仍按 HIGH 硬 HIT。现：命中的只有已知
+        // alias 时降为 LOW + heuristic；混有非 alias 函数才维持 HIGH。
+        static const char* const kAlias[] = {"open", "stat"};
+        bool onlyAlias = true;
+        for (const auto& h : hooked) {
+            bool isAlias = false;
+            for (const char* a : kAlias) {
+                if (h == a) { isAlias = true; break; }
+            }
+            if (!isAlias) { onlyAlias = false; break; }
+        }
+        if (onlyAlias) {
+            Evidence e = makeHit(RSs("E.INLINE_HOOK"), Category::HOOK,
+                                 Severity::LOW, Confidence::LOW,
+                                 RSs("仅 bionic alias 函数入口为跳转（弱信号）"));
+            for (const auto& s : hooked) e.addVector(RSs("jump"), s);
+            for (const auto& s : clean) e.addVector(RSs("clean"), s);
+            e.heuristic = true;
+            e.fp_note = RSs("open→openat、stat→fstatat 是 bionic 自带的"
+                            "alias 跳转，原厂即如此");
+            r.add(std::move(e));
+            return;
+        }
         Evidence e = makeHit(RSs("E.INLINE_HOOK"), Category::HOOK,
                              Severity::HIGH, Confidence::MEDIUM,
                              RSs("libc 函数入口被改写为跳转"));

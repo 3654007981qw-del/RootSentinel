@@ -22,6 +22,7 @@ struct ListenPort {
     int         port = 0;
     std::string addr;
     std::string proto;
+    uint64_t    inode = 0;   // /proc/net/tcp* 的 socket inode（归属判定用）
 };
 
 // /proc/net/tcp 里 local_address 形如 "0100007F:69A2"（小端 IP + 大端端口）
@@ -46,10 +47,12 @@ std::vector<ListenPort> collectListeners(const std::string& path,
             if (!c.empty()) f.push_back(c);
         }
         if (f.size() < 4) continue;
-        // f[1]=local_address  f[3]=st
+        // f[1]=local_address  f[3]=st  f[9]=inode
         if (f[3] != RSs("0A")) continue;  // TCP_LISTEN
         const int p = hexPort(f[1]);
-        if (p > 0) out.push_back(ListenPort{p, f[1], proto});
+        uint64_t ino = 0;
+        if (f.size() > 9) ino = std::strtoull(f[9].c_str(), nullptr, 10);
+        if (p > 0) out.push_back(ListenPort{p, f[1], proto, ino});
     }
     return out;
 }
@@ -66,11 +69,29 @@ void checkNet(ScanReport& r) {
     // ---------------------------------------------------------- X.FRIDA_PORT
     {
         static const int fridaPorts[] = {27042, 27043, 27044, 27045, 27046};
+        // v2.22.45（审查 A P0-5）：/proc/net/tcp* 是网络命名空间级视图，
+        // 端口不一定是本进程开的。先收集本进程 fd 持有的 socket inode，
+        // 只有监听 socket 的 inode 属于本进程才按 CRITICAL 判；仅在
+        // 命名空间里存在（别的进程开的）降为 MEDIUM + heuristic。
+        std::vector<uint64_t> ownInodes;
+        for (const auto& fe : listDirRaw(RSs("/proc/self/fd"))) {
+            const std::string t = readLink(RSs("/proc/self/fd/") + fe.name);
+            if (startsWith(t, RSs("socket:[")) && t.size() > 9) {
+                ownInodes.push_back(
+                    std::strtoull(t.c_str() + 8, nullptr, 10));
+            }
+        }
         std::vector<std::string> hit;
+        std::vector<std::string> foreignHit;
         for (const auto& lp : all) {
             for (const int p : fridaPorts) {
                 if (lp.port == p) {
-                    hit.push_back(lp.proto + RSs(":") + std::to_string(lp.port));
+                    bool own = false;
+                    for (const uint64_t oi : ownInodes) {
+                        if (oi == lp.inode && lp.inode != 0) { own = true; break; }
+                    }
+                    (own ? hit : foreignHit).push_back(
+                        lp.proto + RSs(":") + std::to_string(lp.port));
                     break;
                 }
             }
@@ -79,9 +100,19 @@ void checkNet(ScanReport& r) {
         if (!hit.empty()) {
             Evidence e = makeHit(RSs("X.FRIDA_PORT"), Category::CROSSCHECK,
                                  Severity::CRITICAL, Confidence::HIGH,
-                                 RSs("本地监听命中 Frida 默认端口"));
+                                 RSs("本进程监听命中 Frida 默认端口"));
             for (const auto& h : hit) e.addVector(RSs("listen"), h);
+            e.detail = RSs("监听 socket 的 inode 经 /proc/self/fd 对照，确属本进程");
+            r.add(std::move(e));
+        } else if (!foreignHit.empty()) {
+            Evidence e = makeHit(RSs("X.FRIDA_PORT"), Category::CROSSCHECK,
+                                 Severity::MEDIUM, Confidence::LOW,
+                                 RSs("网络命名空间内存在 Frida 默认端口监听（非本进程）"));
+            for (const auto& h : foreignHit) e.addVector(RSs("listen"), h);
+            e.heuristic = true;
             e.detail = RSs("frida-server 默认监听 27042，可用 -l 改端口");
+            e.fp_note = RSs("该端口属于同一网络命名空间内的其他进程，"
+                            "不是本进程被注入的直接证据");
             r.add(std::move(e));
         } else {
             Evidence e = makePass(RSs("X.FRIDA_PORT"), Category::CROSSCHECK,

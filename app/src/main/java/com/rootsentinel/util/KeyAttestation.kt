@@ -287,12 +287,16 @@ object KeyAttestation {
     }
 
     // ================================================================ DER 读取
-    private class Der(private val d: ByteArray, private var p: Int = 0) {
+    // v2.22.45（审查 B P2-08）：改 internal —— 此前全仓没有任何自动
+    // 化测试，这个安全关键解析器只能靠人肉回归；现在 DER 测试向量
+    // 在 app/src/test 里，同模块可见即可构造。
+    internal class Der(private val d: ByteArray, private var p: Int = 0) {
 
         fun eof() = p >= d.size
 
         /** 返回 tag 的完整数值（多字节标签会合并成 24 位整数） */
         fun readTag(): Int {
+            if (p >= d.size) return -1
             val b0 = d[p].toInt() and 0xFF
             p++
             if ((b0 and 0x1F) != 0x1F) return b0
@@ -335,10 +339,13 @@ object KeyAttestation {
             return v
         }
 
-        fun readRaw(len: Int): ByteArray {
-            val n = minOf(len, d.size - p)
-            val out = d.copyOfRange(p, p + n)
-            p += n
+        // v2.22.45（审查 B P2-06）：旧实现用 minOf 把超长声明静默
+        // 截断，截断/伪造的 DER 也能解出「看起来有效」的字段。
+        // 现在声明长度超过剩余数据直接失败（返回 null）。
+        fun readRaw(len: Int): ByteArray? {
+            if (len < 0 || len > d.size - p) return null
+            val out = d.copyOfRange(p, p + len)
+            p += len
             return out
         }
 
@@ -348,12 +355,8 @@ object KeyAttestation {
             val tag = readTag()
             val len = readLength()
             if (len < 0) return null
-            val v = readRaw(len)
+            val v = readRaw(len) ?: return null
             return tag to v
-        }
-
-        fun skip(len: Int) {
-            p = minOf(d.size, p + len)
         }
 
         fun peek(): Int = if (eof()) -1 else (d[p].toInt() and 0xFF)
@@ -379,6 +382,9 @@ object KeyAttestation {
         // 外层 SEQUENCE
         val outer = der.readTlv() ?: return null
         if ((outer.first and 0xFF) != 0x30) return null     // SEQUENCE
+        // v2.22.45（审查 B P2-06）：外层 SEQUENCE 之后不应再有尾随
+        // 字节；有则说明输入不是一份完整的 KeyDescription。
+        if (!der.eof()) return null
 
         val seq = Der(outer.second)
         var securityLevel = -1
@@ -399,7 +405,9 @@ object KeyAttestation {
 
         var index = 0
         while (!seq.eof()) {
-            val tlv = seq.readTlv() ?: break
+            // v2.22.45（审查 B P2-06）：SEQUENCE 内部截断即整体失败，
+            // 不再用已解出的前半段字段下结论。
+            val tlv = seq.readTlv() ?: return null
             val tag = tlv.first and 0xFF
             val value = tlv.second
 
@@ -500,7 +508,9 @@ object KeyAttestation {
         val der = Der(body)
 
         while (!der.eof()) {
-            val tlv = der.readTlv() ?: break
+            // v2.22.45（审查 B P2-06）：列表中途截断时已解出的字段
+            // 同样不可信，整表作废（返回空结果），不用半份数据。
+            val tlv = der.readTlv() ?: return AuthParsed()
             val tag = tlv.first
             val value = tlv.second
 

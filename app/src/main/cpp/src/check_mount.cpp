@@ -116,6 +116,20 @@ void checkMount(ScanReport& r) {
         r.add(std::move(e));
     }
 
+    // v2.22.45（审查 B P2-04）：结构化 CrossCheck 生产者 —— 此前
+    // addCrossCheck 全仓无调用点，crosses 恒空，评分层的
+    // CROSSCHECK_BONUS 是死路径。这里只登记结构化观测（证据本体
+    // 仍是上面的 C.MOUNT_MULTI），不走 addCrossCheck 以免重复产证。
+    {
+        CrossCheck cc;
+        cc.id = RSs("C.MOUNT_MULTI");
+        cc.subject = RSs("mountinfo 与 mounts 的挂载点集合");
+        cc.observe(RSs("mountinfo"), std::to_string(fromMountinfo.size()));
+        cc.observe(RSs("mounts"), std::to_string(fromMounts.size()));
+        cc.consistent = (mismatch == 0 && extra == 0);
+        r.addCross(cc);
+    }
+
     // ---------------------------------------------------------- 可疑 source
     const std::vector<std::string> badKeywords = {
         RSs("magisk"), RSs("kernelsu"), RSs("ksu"), RSs("apatch"),
@@ -209,14 +223,23 @@ void checkMount(ScanReport& r) {
         {RSs("/vendor/build.prop"), RSs("/vendor")},
     };
 
+    // v2.22.45（审查 B P2-05）：旧实现 statfs 失败直接 continue，
+    // 全部失败时 C.STATFS 整项消失，调度层无从知道没测成。现统计
+    // 成功数，全失败补 UNKNOWN。
+    int statfsOk = 0;
     for (const auto& p : probes) {
         struct statfs sf{};
         if (sys::statfs_(p.first.c_str(), &sf) != 0) continue;
+        ++statfsOk;
         Evidence e = makePass(RSs("C.STATFS"), Category::MOUNT,
                               RSs("statfs 可读: ") + p.first);
         e.addVector(RSs("f_type"), hex64((uint64_t)sf.f_type));
         e.addVector(RSs("f_bsize"), std::to_string(sf.f_bsize));
         r.add(std::move(e));
+    }
+    if (statfsOk == 0) {
+        r.add(makeUnknown(RSs("C.STATFS"), Category::MOUNT, Severity::LOW,
+                          RSs("statfs 全部探测失败")));
     }
 
     // ---------------------------------------------------------- 元数据互验
@@ -230,6 +253,12 @@ void checkMount(ScanReport& r) {
         RSs("/system/build.prop"), RSs("/system/bin/sh"),
         RSs("/vendor/build.prop"),
     };
+    // v2.22.45（审查 B P2-05）：旧实现读取失败静默 continue、一致
+    // 时也不产出任何证据 —— 测没测成、过没过都无从区分。现统计
+    // 可比数：0 个可比 → UNKNOWN；可比且全一致 → PASS；同时登记
+    // 结构化 CrossCheck（审查 B P2-04 生产者）。
+    int metaCompared = 0;
+    int metaBad = 0;
     for (const auto& p : metaPaths) {
         sys::rawstat rs1{};
         if (sys::fstat_open_raw(p.c_str(), &rs1) != 0) continue;
@@ -237,10 +266,12 @@ void checkMount(ScanReport& r) {
         sys::statx_buf sx{};
         if (sys::statx_(p.c_str(), &sx, nullptr, 0) != 0) continue;
 
+        ++metaCompared;
         const uint64_t dev2 = ((uint64_t)sx.stx_dev_major << 32) | sx.stx_dev_minor;
         const bool same = (rs1.dev == dev2) && (rs1.ino == sx.stx_ino);
 
         if (!same) {
+            ++metaBad;
             Evidence e = makeHit(RSs("C.META_MISMATCH"), Category::MOUNT,
                                  Severity::HIGH, Confidence::HIGH,
                                  RSs("元数据视角矛盾: ") + p);
@@ -249,6 +280,25 @@ void checkMount(ScanReport& r) {
             e.detail = RSs("同一路径两个视角给出不同的 dev/ino");
             r.add(std::move(e));
         }
+    }
+    if (metaCompared == 0) {
+        r.add(makeUnknown(RSs("C.META_MISMATCH"), Category::MOUNT,
+                          Severity::LOW,
+                          RSs("元数据双视角均不可读，无法互验")));
+    } else {
+        if (metaBad == 0) {
+            Evidence e = makePass(RSs("C.META_MISMATCH"), Category::MOUNT,
+                                  RSs("元数据双视角一致"));
+            e.addVector(RSs("compared"), std::to_string(metaCompared));
+            r.add(std::move(e));
+        }
+        CrossCheck cc;
+        cc.id = RSs("C.META_MISMATCH");
+        cc.subject = RSs("fstat(fd) 与 statx 的 dev/ino");
+        cc.observe(RSs("compared"), std::to_string(metaCompared));
+        cc.observe(RSs("mismatch"), std::to_string(metaBad));
+        cc.consistent = (metaBad == 0);
+        r.addCross(cc);
     }
 
     // ---------------------------------------------------------- mount ID 空洞

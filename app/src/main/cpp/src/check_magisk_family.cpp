@@ -222,7 +222,16 @@ void checkMagiskFamily(ScanReport& r) {
     // EACCES = /data/adb 存在（原厂无此目录，返回 ENOENT）。
     {
         const int st = accessState(RSs("/data/adb/modules"), 0);
-        if (st == 1) {
+        // v2.22.45（审查 A P2-18）：与父目录口径互证。/data/adb 本身
+        // 返回 ENOENT 而子路径却 EACCES 是自相矛盾的观测（更像过滤
+        // 伪造或策略噪声），记 UNKNOWN 不下 HIT；父目录存在（可达或
+        // EACCES）时子路径 EACCES 的「存在」推断才成立。
+        const int parentSt = accessState(RSs("/data/adb"), 0);
+        if (st == 1 && parentSt == 2) {
+            r.add(makeUnknown(RSs("A.MODULES_DIR"), Category::ARTIFACT,
+                              Severity::LOW,
+                              RSs("/data/adb 不存在但 modules 返回 EACCES，观测矛盾")));
+        } else if (st == 1) {
             Evidence e = makeHit(RSs("A.MODULES_DIR"), Category::ARTIFACT,
                                  Severity::HIGH, Confidence::MEDIUM,
                                  RSs("/data/adb/modules 存在"));

@@ -703,8 +703,23 @@ fun ReportPage(
                 // v2.22.44（P2-08）：导出不在点击回调（主线程）里
                 // 同步执行，改走 IO 协程。
                 onClick = {
+                    // v2.22.45（审查 B P3-02）：以前导出结果被直接丢弃，
+                    // 成功失败用户都无从知道。现在回主线程给 Toast 反馈。
                     exportScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                        JsonExporter.export(ctx, result)
+                        val file = JsonExporter.export(ctx, result)
+                        kotlinx.coroutines.withContext(
+                            kotlinx.coroutines.Dispatchers.Main,
+                        ) {
+                            android.widget.Toast.makeText(
+                                ctx,
+                                if (file != null) {
+                                    "已导出: ${file.name}"
+                                } else {
+                                    "导出失败"
+                                },
+                                android.widget.Toast.LENGTH_SHORT,
+                            ).show()
+                        }
                     }
                 },
                 modifier = Modifier.weight(1f),

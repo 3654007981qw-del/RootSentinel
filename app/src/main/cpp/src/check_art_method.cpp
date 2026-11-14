@@ -107,8 +107,11 @@ void checkArtMethod(JNIEnv* env, ScanReport& r) {
         contains(path, RSs(".oat")) ||
         contains(path, RSs(".vdex")) ||
         contains(path, RSs(".odex")) ||
-        contains(path, RSs("dalvik")) ||
-        contains(path, RSs("art"));
+        // v2.22.45（审查 A P1-11）：删掉裸 contains(path,"art") ——
+        // "smart"/"start"/包名含 art 的路径都会被误放行。合法 ART
+        // 路径靠上面的扩展名与 dalvik 覆盖（/apex/com.android.art/
+        // 仍命中 ".art"）。
+        contains(path, RSs("dalvik"));
 
     // 抽取权限位用于展示
     std::string perms;

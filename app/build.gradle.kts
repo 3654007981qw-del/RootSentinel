@@ -112,8 +112,8 @@ android {
         applicationId = "com.rootsentinel"
         minSdk = 26
         targetSdk = 36
-        versionCode = 22244
-        versionName = "2.22.44"
+        versionCode = 22245
+        versionName = "2.22.45"
 
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
@@ -199,6 +199,11 @@ dependencies {
     // Miuix 内部已用 kyant-shapes（implementation，不传递）：backdrop 的 lens()
     // 需要 RoundedRectangularShape / Capsule，这里显式声明同一坐标，保证编译可见且不重复。
     implementation("io.github.kyant0:shapes:1.2.0")
+
+    // v2.22.45（审查 B P2-08）：单元测试。org.json 需要真实实现
+    // （android.jar 里的是桩），JUnit 跑协议严格性 / DER 向量 / 去重。
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20231013")
 
 
     // 液态玻璃：三个候选库已逐一实测（2026-11-08），结论全部无法直接依赖：

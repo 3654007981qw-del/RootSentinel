@@ -24,7 +24,10 @@ void checkSelinux(ScanReport& r) {
 
         // 进程不该处于这些域
         static const std::vector<std::string> badDomains = {
-            RSs(":su:"), RSs(":ksu:"), RSs(":magisk:"), RSs(":u:r:shell:s0"),
+            // v2.22.45（审查 A P1-7）：shell 域旧写法 ":u:r:shell:s0"
+            // 带前导冒号，而真实上下文以 "u:r:shell:s0" 开头，永远匹配
+            // 不到；改用与其他条目一致的字段夹逼写法 ":shell:"。
+            RSs(":su:"), RSs(":ksu:"), RSs(":magisk:"), RSs(":shell:"),
         };
         bool bad = false;
         for (const auto& d : badDomains) {
@@ -101,33 +104,51 @@ void checkSelinux(ScanReport& r) {
 
     // ---------------------------------------------------------- 基线节点
     // 原厂 App 应该能读这些；读不到即为过度隐藏
+    // v2.22.45（审查 A P1-8）：旧口径 denied>=1 即 HIGH HIT，且
+    // EACCES 与 ENOENT 不分 —— 单个节点在个别厂商/版本策略下本来
+    // 就不可读时必然误报。现在：EACCES 与 ENOENT 分开计数，
+    // denied>=2 才 HIGH；恰 1 个降 LOW + heuristic 只作提示。
     const std::vector<std::string> baseline = {
         RSs("/proc/version"), RSs("/proc/stat"), RSs("/proc/uptime"),
         RSs("/proc/loadavg"), RSs("/proc/misc"), RSs("/proc/devices"),
         RSs("/proc/partitions"), RSs("/proc/filesystems"),
     };
 
-    int denied = 0;
+    int deniedAccess = 0;
+    int deniedMissing = 0;
     std::string firstDenied;
     for (const auto& p : baseline) {
         const int st = accessState(p, R_OK);
         if (st == 1) {
-            ++denied;
+            ++deniedAccess;
             if (firstDenied.empty()) firstDenied = p;
         } else if (st == 2) {
-            // 不存在也算异常：原厂必有
-            ++denied;
+            ++deniedMissing;
             if (firstDenied.empty()) firstDenied = p + RSs(" (ENOENT)");
         }
     }
-    if (denied > 0) {
+    const int denied = deniedAccess + deniedMissing;
+    if (denied >= 2) {
         Evidence e = makeHit(RSs("F.OVER_HIDING"), Category::SELINUX,
                              Severity::HIGH, Confidence::HIGH,
                              RSs("原厂必可读的节点被拒绝 ← 过度隐藏"));
         e.addVector(RSs("denied"), std::to_string(denied) + "/" +
                                    std::to_string(baseline.size()));
+        e.addVector(RSs("eacces"), std::to_string(deniedAccess));
+        e.addVector(RSs("enoent"), std::to_string(deniedMissing));
         e.addVector(RSs("first"), firstDenied);
         e.detail = RSs("读不到比读得到更可疑：检测器一行代码即可判定异常");
+        r.add(std::move(e));
+    } else if (denied == 1) {
+        Evidence e = makeHit(RSs("F.OVER_HIDING"), Category::SELINUX,
+                             Severity::LOW, Confidence::LOW,
+                             RSs("单个基线节点不可读（弱信号）"));
+        e.addVector(RSs("denied"), std::to_string(denied) + "/" +
+                                   std::to_string(baseline.size()));
+        e.addVector(RSs("first"), firstDenied);
+        e.heuristic = true;
+        e.fp_note = RSs("个别厂商 / Android 版本的 SELinux 策略会让单个"
+                        "/proc 节点对 App 不可读，单点不足以判定过度隐藏");
         r.add(std::move(e));
     } else {
         r.add(makePass(RSs("F.OVER_HIDING"), Category::SELINUX,

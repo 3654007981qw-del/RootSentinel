@@ -14,6 +14,7 @@
 #include <cstdio>
 #include <cstring>
 #include <unistd.h>
+#include <atomic>
 #include <sys/wait.h>
 
 #include "rs_str.h"
@@ -62,9 +63,11 @@ Probe3 probeNoAlloc() {
 
 void checkCrossProcess(ScanReport& r) {
     // 只做一次，避免每次检测都 fork
-    static bool done = false;
-    if (done) return;
-    done = true;
+    // v2.22.45（审查 A P2-20）：改用 atomic —— 当前 nativeScan 有
+    // 互斥串行化所以旧 bool 写法没出过问题，但放开并发后即是数据
+    // 竞争，先把隐患堵上。
+    static std::atomic<bool> done{false};
+    if (done.exchange(true)) return;
 
     int fds[2];
     if (pipe(fds) != 0) {
@@ -120,6 +123,18 @@ void checkCrossProcess(ScanReport& r) {
     parentStr += parent.versionReadable;
     parentStr += parent.statReadable;
     parentStr += parent.dataAdb;
+
+    // v2.22.45（审查 B P2-04）：结构化 CrossCheck 生产者（证据本体
+    // 仍是下方 X.CHILD_PROC；这里只登记 crosses 供评分层使用）。
+    {
+        CrossCheck cc;
+        cc.id = RSs("X.CHILD_PROC");
+        cc.subject = RSs("父子进程三点观测（version/stat/data_adb）");
+        cc.observe(RSs("child"), childStr);
+        cc.observe(RSs("parent"), parentStr);
+        cc.consistent = same;
+        r.addCross(cc);
+    }
 
     if (same) {
         Evidence e = makePass(RSs("X.CHILD_PROC"), Category::CROSSCHECK,

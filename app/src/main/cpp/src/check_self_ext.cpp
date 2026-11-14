@@ -77,6 +77,13 @@ void checkSelfExt(ScanReport& r) {
         if (mode.empty()) {
             r.add(makeUnknown(RSs("I.SECCOMP_FILTERS"), Category::INTEGRITY,
                               Severity::LOW, RSs("Seccomp 字段缺失")));
+        } else if (mode == RSs("2") && filters.empty()) {
+            // v2.22.45（审查 A P0-4）：Seccomp_filters 字段是较新内核
+            // 才有的；字段缺失 != 过滤器为 0。Seccomp=2 已说明过滤
+            // 生效，此情形记 UNKNOWN，不再误判 HIT。
+            r.add(makeUnknown(RSs("I.SECCOMP_FILTERS"), Category::INTEGRITY,
+                              Severity::LOW,
+                              RSs("Seccomp_filters 字段缺失（内核未提供），仅确认 Seccomp=2")));
         } else if (mode == RSs("2") && !filters.empty() && filters != RSs("0")) {
             Evidence e = makePass(RSs("I.SECCOMP_FILTERS"), Category::INTEGRITY,
                                   RSs("seccomp 过滤器已安装"));

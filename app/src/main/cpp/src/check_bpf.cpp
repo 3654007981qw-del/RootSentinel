@@ -69,11 +69,13 @@ void checkBpf(ScanReport& r) {
     // ---------------------------------------------------------- bpf() syscall
     // 直接尝试创建最小的 ARRAY map，判断内核是否允许 App 使用 BPF
     {
-        char attr[128] = {0};
-        *reinterpret_cast<uint32_t*>(attr + 0)  = BPF_MAP_TYPE_ARRAY;  // map_type
-        *reinterpret_cast<uint32_t*>(attr + 4)  = 4;                   // key_size
-        *reinterpret_cast<uint32_t*>(attr + 8)  = 4;                   // value_size
-        *reinterpret_cast<uint32_t*>(attr + 12) = 1;                   // max_entries
+        // v2.22.45（审查 A P2-15）：旧写法 char[128] + reinterpret_cast
+        // 写 uint32_t 有未对齐与严格别名问题；改用对齐的 uint32_t 数组。
+        alignas(8) uint32_t attr[32] = {0};
+        attr[0] = BPF_MAP_TYPE_ARRAY;  // map_type
+        attr[1] = 4;                   // key_size
+        attr[2] = 4;                   // value_size
+        attr[3] = 1;                   // max_entries
 
         long ret = sys::raw(sys::NR_bpf, BPF_MAP_CREATE,
                             (long)attr, (long)sizeof(attr), 0, 0, 0);

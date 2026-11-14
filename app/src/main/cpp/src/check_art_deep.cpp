@@ -18,6 +18,7 @@
 
 namespace rs {
 bool isAddressInModule(void* addr, const char* moduleHint);
+bool isAddressInModuleAnyPerm(void* addr, const char* moduleHint);
 
 namespace {
 
@@ -92,7 +93,11 @@ void checkArtDeep(ScanReport& r) {
             Evidence e = makePass(RSs("E.ART_SYMBOL"), Category::HOOK,
                                   RSs("libart 符号可解析: ") + s);
             e.addVector(RSs("addr"), hex64((uint64_t)(uintptr_t)p));
-            if (!isAddressInModule(p, "libart.so")) {
+            // v2.22.45（审查 A P0-1）：instance_ 是数据符号，位于
+            // libart 的 .data/.bss，不在可执行段；exec-only 的
+            // isAddressInModule 在正常设备上也必然落空 → 误报
+            // CRITICAL。改用不限权限的版本。
+            if (!isAddressInModuleAnyPerm(p, "libart.so")) {
                 e.verdict = Verdict::HIT;
                 e.severity = Severity::CRITICAL;
                 e.confidence = Confidence::HIGH;

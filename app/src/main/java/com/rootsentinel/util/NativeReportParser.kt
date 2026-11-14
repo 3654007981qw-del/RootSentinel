@@ -79,6 +79,7 @@ object NativeReportParser {
             }
             var sawUnknownCategory = false
             var sawBlankId = false
+            var sawUnknownEnum = false
             for (i in 0 until arr.length()) {
                 val o = arr.getJSONObject(i)
                 // v2.22.44（P2-02）：id 缺失/为空是协议错误。空 ID 证据
@@ -92,13 +93,25 @@ object NativeReportParser {
                 // 扫描标记为不完整。
                 val cat = categoryOf(o.optString("category"))
                 if (cat == null) sawUnknownCategory = true
+                // v2.22.45（审查 B P2-03）：严重度 / 置信度 / 判定三个
+                // 枚举以前对未知值静默降级（severity→INFO 权重 0、
+                // confidence→LOW），协议错位时高危证据会被悄悄低估。
+                // 现在任一枚举不可识别 → 置 protocolError，且该条
+                // 证据的判定强制 UNKNOWN（与未知类别同口径）。
+                val sev = severityOf(o.optString("severity"))
+                val conf = confidenceOf(o.optString("confidence"))
+                val verd = verdictOf(o.optString("verdict"))
+                if (sev == null || conf == null || verd == null) {
+                    sawUnknownEnum = true
+                }
                 items += Evidence(
                     id = o.optString("id"),
                     category = cat ?: Category.CROSSCHECK,
-                    severity = severityOf(o.optString("severity")),
-                    confidence = confidenceOf(o.optString("confidence")),
-                    verdict = if (cat == null) Verdict.UNKNOWN
-                        else verdictOf(o.optString("verdict")),
+                    severity = sev ?: Severity.INFO,
+                    confidence = conf ?: Confidence.LOW,
+                    verdict = if (cat == null || sev == null ||
+                        conf == null || verd == null
+                    ) Verdict.UNKNOWN else verd,
                     heuristic = o.optBoolean("heuristic"),
                     title = o.optString("title"),
                     detail = o.optString("detail"),
@@ -152,7 +165,7 @@ object NativeReportParser {
                 items = items, profile = profile, crosses = crosses,
                 version = version,
                 protocolError = sawUnknownCategory || sawBlankId ||
-                    sawInconsistentMissing,
+                    sawInconsistentMissing || sawUnknownEnum,
             )
         } catch (t: Throwable) {
             Parsed(
@@ -177,24 +190,27 @@ object NativeReportParser {
         else -> null
     }
 
-    private fun severityOf(s: String): Severity = when (s) {
+    private fun severityOf(s: String): Severity? = when (s) {
         "CRITICAL" -> Severity.CRITICAL
         "HIGH" -> Severity.HIGH
         "MEDIUM" -> Severity.MEDIUM
         "LOW" -> Severity.LOW
-        else -> Severity.INFO
+        "INFO" -> Severity.INFO
+        else -> null
     }
 
-    private fun confidenceOf(s: String): Confidence = when (s) {
+    private fun confidenceOf(s: String): Confidence? = when (s) {
         "VERIFIED" -> Confidence.VERIFIED
         "HIGH" -> Confidence.HIGH
         "MEDIUM" -> Confidence.MEDIUM
-        else -> Confidence.LOW
+        "LOW" -> Confidence.LOW
+        else -> null
     }
 
-    private fun verdictOf(s: String): Verdict = when (s) {
+    private fun verdictOf(s: String): Verdict? = when (s) {
         "HIT" -> Verdict.HIT
         "PASS" -> Verdict.PASS
-        else -> Verdict.UNKNOWN
+        "UNKNOWN" -> Verdict.UNKNOWN
+        else -> null
     }
 }

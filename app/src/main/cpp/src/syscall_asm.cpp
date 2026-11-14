@@ -160,6 +160,20 @@ long process_vm_readv_(pid_t pid, const void* local, unsigned long liovcnt,
                (long)remote, (long)riovcnt, (long)flags);
 }
 
+// v2.22.45（审查 A P0-6）：dev_t -> (major<<32)|minor 的统一打包。
+// 旧 statx 回退把 st_dev 的高/低 32 位直填 stx_dev_major/minor，那不
+// 是 Linux dev_t 的 major/minor 编码；fstatat_raw 的直连回退又返回未
+// 打包的原始 st_dev。三条路径口径不一致时，C.META_MISMATCH 在无
+// statx 的老内核上必然误报。现在全部走这个解码，与 fstat_open_raw
+// 和 statx 原生返回的 stx_dev_major/minor 同口径。
+static uint64_t packDev(uint64_t dev) {
+    const uint64_t major = ((dev >> 8) & 0xfffULL) |
+                           ((dev >> 20) & 0xfffff000ULL);
+    const uint64_t minor = (dev & 0xffULL) |
+                           ((dev >> 12) & 0xffffff00ULL);
+    return (major << 32) | minor;
+}
+
 int statx_(const char* path, statx_buf* out, bool* usedFallback, int flags) {
     if (usedFallback) *usedFallback = false;
 
@@ -184,8 +198,9 @@ int statx_(const char* path, statx_buf* out, bool* usedFallback, int flags) {
         out->stx_nlink = (uint32_t)st.st_nlink;
         out->stx_uid   = (uint32_t)st.st_uid;
         out->stx_gid   = (uint32_t)st.st_gid;
-        out->stx_dev_major = (uint32_t)((uint64_t)st.st_dev >> 32);
-        out->stx_dev_minor = (uint32_t)((uint64_t)st.st_dev & 0xffffffff);
+        const uint64_t packed = packDev((uint64_t)st.st_dev);
+        out->stx_dev_major = (uint32_t)(packed >> 32);
+        out->stx_dev_minor = (uint32_t)(packed & 0xffffffffULL);
         out->stx_mask  = 0;
         return 0;
     }
@@ -210,7 +225,7 @@ int fstatat_raw(const char* path, rawstat* out, int flags) {
     long r = raw(NR_fstatat, (long)AT_FDCWD_, (long)path, (long)&st,
                  (long)flags, 0, 0);
     if (r != 0) { errno = (int)(-r); return -1; }
-    out->dev  = (uint64_t)st.st_dev;
+    out->dev  = packDev((uint64_t)st.st_dev);
     out->ino  = (uint64_t)st.st_ino;
     out->size = (uint64_t)st.st_size;
     return 0;
@@ -229,12 +244,7 @@ int fstat_open_raw(const char* path, rawstat* out) {
     long r = raw(NR_fstat, (long)fd, (long)&st, 0, 0, 0, 0);
     close_(fd);
     if (r != 0) { errno = (int)(-r); return -1; }
-    const uint64_t dev = (uint64_t)st.st_dev;
-    const uint64_t major = ((dev >> 8) & 0xfffULL) |
-                           ((dev >> 20) & 0xfffff000ULL);
-    const uint64_t minor = (dev & 0xffULL) |
-                           ((dev >> 12) & 0xffffff00ULL);
-    out->dev  = (major << 32) | minor;
+    out->dev  = packDev((uint64_t)st.st_dev);
     out->ino  = (uint64_t)st.st_ino;
     out->size = (uint64_t)st.st_size;
     return 0;

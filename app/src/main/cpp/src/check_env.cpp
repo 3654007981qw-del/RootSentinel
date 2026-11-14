@@ -95,11 +95,15 @@ void checkEnv(ScanReport& r) {
             unsigned long secure = 0;
             std::string execfn;
             const size_t n = aux.size() / (sizeof(unsigned long) * 2);
-            const unsigned long* p =
-                reinterpret_cast<const unsigned long*>(aux.data());
             for (size_t i = 0; i < n; ++i) {
-                unsigned long type = p[i * 2];
-                unsigned long val  = p[i * 2 + 1];
+                // v2.22.45（审查 A P2-16）：逐项 memcpy，避免把 string
+                // 缓冲 reinterpret_cast 成 unsigned long* 的别名/对齐
+                // 隐患（实机缓冲是堆对齐的，属健壮性收口）。
+                unsigned long pair[2];
+                std::memcpy(pair, aux.data() + i * sizeof(pair),
+                            sizeof(pair));
+                unsigned long type = pair[0];
+                unsigned long val  = pair[1];
                 if (type == AT_NULL) break;
                 if (type == AT_SECURE) secure = val;
                 if (type == AT_EXECFN && val != 0) {

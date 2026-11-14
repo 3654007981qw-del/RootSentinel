@@ -168,23 +168,43 @@ void checkFsDeep(ScanReport& r) {
             }
         }
 
-        if (withAttr + withoutAttr == 0) {
-            r.add(makeUnknown(RSs("C.VERITY"), Category::MOUNT, Severity::LOW,
-                              RSs("statx 属性不可读（旧内核无 statx）")));
-        } else if (withoutAttr == 0) {
-            Evidence e = makePass(RSs("C.VERITY"), Category::MOUNT,
-                                  RSs("系统文件保留 verity/immutable 属性"));
-            for (const auto& s : lines) e.addVector(RSs("attr"), s);
-            r.add(std::move(e));
-        } else {
+        // v2.22.45（审查 B P2-02）：判定口径重构。旧逻辑里 unreadable
+        // 被统计却不参与结论 —— 1 个有属性 + 1 个读不到也能 PASS；
+        // 且「全部文件都无属性」直接判 HIT，但那同样符合「该 ROM 根
+        // 本没启用 fs-verity」。现在：
+        //   有带属性也有可观测地缺失 → 属性被剥离的实证 → HIT
+        //   全部可观测文件都有属性且无 unreadable → PASS
+        //   其余（部分不可读 / 全部缺失 / 全部不可读）→ UNKNOWN
+        if (withAttr > 0 && withoutAttr > 0) {
             Evidence e = makeHit(RSs("C.VERITY"), Category::MOUNT,
                                  Severity::MEDIUM, Confidence::MEDIUM,
                                  RSs("部分系统文件丢失 verity/immutable 属性"));
             for (const auto& s : lines) e.addVector(RSs("attr"), s);
+            e.addVector(RSs("unreadable"), std::to_string(unreadable));
             e.detail = std::to_string(withoutAttr) + RSs(" 个文件属性被剥离，"
                                                           "通常是 overlay 副本");
-            e.fp_note = RSs("并非所有厂商都启用 fs-verity，"
-                            "未启用时本项恒为缺失");
+            r.add(std::move(e));
+        } else if (withAttr > 0 && unreadable == 0) {
+            Evidence e = makePass(RSs("C.VERITY"), Category::MOUNT,
+                                  RSs("系统文件保留 verity/immutable 属性"));
+            for (const auto& s : lines) e.addVector(RSs("attr"), s);
+            r.add(std::move(e));
+        } else if (withAttr + withoutAttr == 0) {
+            r.add(makeUnknown(RSs("C.VERITY"), Category::MOUNT, Severity::LOW,
+                              RSs("statx 属性不可读（旧内核无 statx）")));
+        } else if (withoutAttr > 0) {
+            Evidence e = makeUnknown(RSs("C.VERITY"), Category::MOUNT,
+                                     Severity::LOW,
+                                     RSs("系统文件均无 verity/immutable 属性（该 ROM 可能未启用 fs-verity）"));
+            for (const auto& s : lines) e.addVector(RSs("attr"), s);
+            e.addVector(RSs("unreadable"), std::to_string(unreadable));
+            r.add(std::move(e));
+        } else {
+            Evidence e = makeUnknown(RSs("C.VERITY"), Category::MOUNT,
+                                     Severity::LOW,
+                                     RSs("部分系统文件属性不可读，无法完整判定"));
+            for (const auto& s : lines) e.addVector(RSs("attr"), s);
+            e.addVector(RSs("unreadable"), std::to_string(unreadable));
             r.add(std::move(e));
         }
     }

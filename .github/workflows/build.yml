@@ -1,0 +1,29 @@
+name: build
+
+# v2.22.45（审查 B P2-08）：仓库此前没有任何 CI。本工作流只做
+# 单元测试 + debug 构建；release 构建按设计失败关闭（无签名凭据
+# 即报错），签名凭据不进 CI，所以这里不跑 assembleRelease。
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Unit tests
+        run: ./gradlew :app:testDebugUnitTest
+
+      - name: Assemble debug
+        run: ./gradlew :app:assembleDebug

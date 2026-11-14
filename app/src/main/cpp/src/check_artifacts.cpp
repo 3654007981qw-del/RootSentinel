@@ -125,14 +125,29 @@ void checkArtifacts(ScanReport& r) {
             // 目录本身不可读，跳过（不是证据）
             continue;
         }
+        // v2.22.45（审查 A P1-13）：只有 ENOENT 才算「枚举到但查
+        // 不到」；EACCES 等错误是「不可验」，不能当作不存在的证据。
         int missing = 0;
+        int unverifiable = 0;
         std::string firstMissing;
         for (const auto& e : rawEntries) {
             const std::string full = d + "/" + e.name;
-            if (!fileExistsRaw(full)) {
+            const int fst = fileStateRaw(full);
+            if (fst == 1) {
                 if (missing == 0) firstMissing = full;
                 ++missing;
+            } else if (fst == 2) {
+                ++unverifiable;
             }
+        }
+        if (missing == 0 && unverifiable > 0) {
+            Evidence ev = makeUnknown(
+                RSs("A.DIR_ENUM_MISMATCH"), Category::ARTIFACT,
+                Severity::LOW,
+                RSs("目录枚举部分条目不可验（权限）: ") + d);
+            ev.addVector(RSs("unverifiable"), std::to_string(unverifiable));
+            r.add(std::move(ev));
+            continue;
         }
         if (missing > 0) {
             Evidence ev = makeHit(

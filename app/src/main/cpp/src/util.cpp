@@ -195,6 +195,16 @@ bool fileExistsRaw(const std::string& path) {
     return sys::statx_(path.c_str(), &sx, nullptr, 0) == 0;
 }
 
+// v2.22.45（审查 A P1-13）：三态探测。fileExistsRaw 把 EACCES 与
+// ENOENT 压成同一个 false，目录枚举互验会把「权限读不到」误判成
+// 「枚举到但不存在」。返回值：0=存在 1=ENOENT（确不存在） 2=其他
+// 错误（不可验）。statx_ 在失败路径上会设置 errno。
+int fileStateRaw(const std::string& path) {
+    sys::statx_buf sx{};
+    if (sys::statx_(path.c_str(), &sx, nullptr, 0) == 0) return 0;
+    return errno == ENOENT ? 1 : 2;
+}
+
 int accessState(const std::string& path, int mode) {
     if (sys::faccessat_(path.c_str(), mode, 0) == 0) return 0;
 

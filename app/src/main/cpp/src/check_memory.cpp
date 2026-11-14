@@ -290,26 +290,11 @@ void checkMemory(ScanReport& r) {
     }
 
     // ---------------------------------------------------------- 匿名可执行
-    int anonX = 0;
-    for (const auto& m : maps) {
-        if (m.path.empty() && m.perms.find('x') != std::string::npos) {
-            ++anonX;
-            if (anonX <= 2) {
-                Evidence e = makeHit(RSs("D.ANON_EXEC"), Category::MEMORY,
-                                     Severity::MEDIUM, Confidence::LOW,
-                                     RSs("匿名可执行映射（需与 JIT 区分）"));
-                e.addVector(RSs("range"), hex64(m.start) + "-" + hex64(m.end));
-                e.heuristic = true;
-                e.fp_note = RSs("ART 的 JIT code cache 也是匿名可执行，"
-                                "必须结合 smaps 的 [anon:jit] 标记区分");
-                r.add(std::move(e));
-            }
-        }
-    }
-    if (anonX == 0) {
-        r.add(makePass(RSs("D.ANON_EXEC"), Category::MEMORY,
-                       RSs("无匿名可执行映射")));
-    }
+    // v2.22.45（审查 A P1-12）：原 D.ANON_EXEC 与 check_anon_exec 的
+    // D.TRUE_ANON 是同一事实集（空路径 + 可执行）的两套口径 —— 这里
+    // 出现即 MEDIUM HIT，那边 ≤6 块却判 PASS，结论矛盾且重复计分。
+    // 现统一由 D.TRUE_ANON 判定（与 D.THREAD_NAME 的收编先例一致），
+    // 本文件不再产出 D.ANON_EXEC。
 
     // ---------------------------------------------------------- 二.2 mincore 探测
     // 用 mincore 检查 maps 中每个可读段的驻留状态；
@@ -413,12 +398,24 @@ void checkMemory(ScanReport& r) {
     // 这里只统计线程总数，不再产出 D.THREAD_NAME。
 
     // ---------------------------------------------------------- fd
+    // v2.22.45（审查 A P0-2）：旧实现 fd target 含 "memfd" 即 HIGH
+    // HIT，但 ART 的 JIT/图形/追踪栈本身就持有 memfd fd（如
+    // /memfd:jit-cache (deleted)），原厂机也会命中。现在与 maps
+    // 路径的 D.MEMFD 同口径：先过 isArtOwnedMemfd / isArtOwnedPath
+    // 过滤，只对非 ART 的 memfd 与 /data/adb 目标报告，且证据封顶。
     int badFd = 0;
     for (const auto& e : listDirRaw(RSs("/proc/self/fd"))) {
         const std::string target = readLink(RSs("/proc/self/fd/") + e.name);
         if (target.empty()) continue;
-        if (contains(target, RSs("/data/adb")) || contains(target, RSs("memfd"))) {
-            ++badFd;
+        const bool adb = contains(target, RSs("/data/adb"));
+        const bool mem = contains(target, RSs("memfd"));
+        if (!adb && !mem) continue;
+        if (mem && !adb) {
+            const std::string real = stripDeleted(target);
+            if (isArtOwnedMemfd(real) || isArtOwnedPath(real)) continue;
+        }
+        ++badFd;
+        if (badFd <= 3) {
             Evidence ev = makeHit(RSs("D.FD"), Category::MEMORY,
                                   Severity::HIGH, Confidence::MEDIUM,
                                   RSs("fd 指向可疑目标: ") + target);

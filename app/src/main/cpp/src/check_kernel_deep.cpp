@@ -27,6 +27,19 @@ const std::vector<std::string>& badModuleNames() {
     return v;
 }
 
+// v2.22.45（审查 A P2-19）：模块名按词边界匹配。旧实现 contains()
+// 子串匹配，"ksu"/"milk" 这类短词会误伤无关模块名。现在只接受
+// 全名相等，或以 "_<k>" 结尾、"<k>_" 开头、含 "_<k>_" 的名字
+// （内核模块名以 _ 分隔词元）。
+bool moduleNameMatches(const std::string& name, const std::string& k) {
+    if (name == k) return true;
+    if (startsWith(name, k + RSs("_"))) return true;
+    if (contains(name, RSs("_") + k + RSs("_"))) return true;
+    const std::string suf = RSs("_") + k;
+    return name.size() > suf.size() &&
+           name.compare(name.size() - suf.size(), suf.size(), suf) == 0;
+}
+
 }  // namespace
 
 void checkKernelDeep(ScanReport& r) {
@@ -41,7 +54,7 @@ void checkKernelDeep(ScanReport& r) {
             ++total;
             const auto low = toLower(d.name);
             for (const auto& k : badModuleNames()) {
-                if (contains(low, k)) {
+                if (moduleNameMatches(low, k)) {
                     found.push_back(d.name);
                     break;
                 }

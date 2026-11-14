@@ -48,6 +48,7 @@ std::vector<std::string> readLines(const std::string& path, size_t maxLines = 20
 
 // ---------------------------------------------------------------- 存在性
 bool fileExistsRaw(const std::string& path);
+int  fileStateRaw(const std::string& path);   // 0 存在 / 1 ENOENT / 2 不可验
 // 0 = 可访问；1 = 存在但拒绝；2 = 不存在
 int  accessState(const std::string& path, int mode = 4);
 // v2.22.41：带 errno 的访问探测。成功返回 0，失败返回原始 errno。

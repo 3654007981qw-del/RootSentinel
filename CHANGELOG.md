@@ -1,5 +1,45 @@
 # Changelog
 
+## 2.22.45
+
+基于对 2.22.44 的第五轮独立审查——本轮有两份（审查 A：P0×6 + P1×8 + P2×6；审查 B：P2×8 + P3×3），共 31 条，经逐条回源码核查：24 条属实、7 条部分属实、0 条不属实（审查 B 附带的两条正面核查——.so 已 strip/对齐、CMake 45 个源文件与目录一致——复核属实）。全部按核查结论修复：
+
+**P0 一组：原厂/模拟器环境误报（审查 A）**
+- A1 E.ART_SYMBOL：`art::Runtime::instance_` 是数据符号（在 libart 的 .data/.bss），旧实现用只收可执行段的 isAddressInModule 判定，正常设备也报 CRITICAL；改用已有的 isAddressInModuleAnyPerm。
+- A2 D.FD：fd 表扫描含 "memfd" 即 HIGH HIT，未做 ART 过滤——ART 的 JIT/图形栈本身持有 memfd fd。与 maps 路径 D.MEMFD 同口径：先过 isArtOwnedMemfd/isArtOwnedPath，只对非 ART memfd 与 /data/adb 报告，证据封顶 3 条。
+- A3 B.PROP_KEYWORD：ro.kernel.qemu 是模拟器标记而非 root 证据，从 root 关键字列表移除（模拟器语境由 check_emulator 单独检查）。
+- A4 I.SECCOMP_FILTERS：Seccomp=2 但 Seccomp_filters 字段缺失（老内核无此字段）旧实现直接 HIT；改判 UNKNOWN，filters=0 维持 HIT。
+- A5 X.FRIDA_PORT：/proc/net/tcp* 是网络命名空间级视图，旧实现任一监听命中 Frida 端口即 CRITICAL。现解析 socket inode 并与 /proc/self/fd 对照：确属本进程才 CRITICAL；仅命名空间存在降 MEDIUM + heuristic。
+- A6 statx 回退 dev 编码：回退把 st_dev 高/低 32 位直填 major/minor，不是 dev_t 编码；fstatat_raw 直连回退又返回未打包的原始 st_dev。统一 packDev() 解码三处共用，无 statx 老内核上 C.META_MISMATCH 不再必误报。
+
+**协议与解析严格化（审查 B）**
+- P2-01 ARM32 fstat ABI：Bionic 的 struct stat 在所有架构上都是 STAT64 布局，ARM32 的 NR_fstat/NR_fstatat 旧值 108/327 写的是旧式结构、元数据全错位；改为 fstat64(197)/fstatat64(268)。
+- P2-03 NativeReportParser：severity/confidence/verdict 未知值不再静默降级（INFO/LOW/UNKNOWN），任一不可识别即置 protocolError 且该证据判定强制 UNKNOWN。
+- P2-06 DER 读取器：readRaw 声明长度超过剩余数据直接失败（旧实现 minOf 静默截断）；parseKeyDescription 增加外层 SEQUENCE 完整消费校验、内层截断整体失败；parseAuthList 截断时整表作废。
+
+**交叉验证接通（审查 B P2-04）**
+- addCrossCheck 自引入起全仓无生产者，crosses 恒空、评分层 CROSSCHECK_BONUS 是死路径。现登记三个真实生产者：X.CHILD_PROC（父子进程三点观测）、C.MOUNT_MULTI（mountinfo↔mounts 集合）、C.META_MISMATCH（fstat↔statx）。只登记结构化观测、不经 addCrossCheck 重复产证。
+
+**判定口径与噪声（审查 A P1 / 审查 B P2-02、P2-05）**
+- F.OVER_HIDING：EACCES 与 ENOENT 分开计数，denied≥2 才 HIGH，恰 1 个降 LOW + heuristic。
+- D.TASK_COUNT：差 ≤1 按瞬时差异 PASS；差 ≥2 重采样一次，两次都 ≥2 才 HIT。
+- E.INLINE_HOOK：仅 bionic alias（open/stat）命中时降 LOW + heuristic，混有非 alias 才维持 HIGH。
+- check_art_method 合法归属删掉裸子串 "art"（"smart" 等误放行），保留扩展名与 dalvik 口径。
+- D.ANON_EXEC 删除：与 D.TRUE_ANON 同一事实集两套口径，统一由 D.TRUE_ANON 判定。
+- A.DIR_ENUM_MISMATCH：新增三态 fileStateRaw，只有 ENOENT 计「枚举到但查不到」，EACCES 等记「不可验」并产 UNKNOWN，不再冒充不存在。
+- C.VERITY：判定重构——有带属性也有可观测缺失才 HIT（剥离实证）；全有且无不可读才 PASS；部分不可读、或全部缺失（ROM 可能未启用 fs-verity）改 UNKNOWN，unreadable 正式参与结论。
+- C.STATFS 全探测失败补 UNKNOWN；C.META_MISMATCH 补可比计数：0 可比 UNKNOWN、全一致 PASS。
+- SELinux shell 域匹配串 ":u:r:shell:s0" 永远匹配不到（真实上下文无前导冒号），改 ":shell:"。
+- A.MODULES_DIR：与父目录 /data/adb 口径互证——父 ENOENT 而子 EACCES 的矛盾观测记 UNKNOWN。
+- B.UNAME_MULTI：两条同 ID PASS 合并为一条，双来源向量并入（评分器去重不再丢向量）。
+
+**健壮性与维护（P2/P3）**
+- check_bpf 的 bpf_attr 改对齐 uint32_t 数组（原 char[128]+reinterpret_cast 有对齐/别名 UB）；check_env auxv 改逐项 memcpy 解析；check_cross_process 的只跑一次标记改 std::atomic；check_kernel_deep 模块名改词边界匹配（"ksu"/"milk" 子串误伤消除）；X.ENV_MATRIX 目录能力改三态（存在且可读/存在不可读/不存在）。
+- 手动导出补 Toast 结果反馈（此前返回值被丢弃，成功失败无提示）。
+- 补 THIRD_PARTY_LICENSES.md 与 LICENSES/Apache-2.0.txt（vendored 的 Kyant Backdrop 源码为 Apache-2.0，此前仓库只有 MIT）；LICENSE 署名随 GitHub 改名更新为 AURORA-0711；README 版本号同步（此前停在 2.22.42）；删 Report.kt 未用变量与 Der 未用方法。
+- 新增单元测试（NativeReportParser 协议严格性、DER 截断拒绝、评分去重）与 GitHub Actions 构建工作流——此前仓库无 test/androidTest 与 CI（审查 B P2-08）；测试在 CI 上运行，本仓库的手工构建管线不跑 Gradle。
+
+
 ## 2.22.44
 
 基于对 2.22.43 的第四份独立静态审查（4 条 P1 + 14 条 P2 + P3，经逐条回源码核查：17 条属实、3 条部分属实、0 条不属实；其中 P1-01 经核查比审查写的更严重，§9 附带的「CMake 源清单重复条目」经复核不成立——syscall_asm.cpp 在源清单里只有一条，另一处是 set_source_files_properties 属性设置）全部修复：
