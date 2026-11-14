@@ -2,6 +2,7 @@ package com.rootsentinel.engine
 
 import android.content.Context
 import com.rootsentinel.NativeBridge
+import com.rootsentinel.RootSentinelVersion
 import com.rootsentinel.model.Category
 import com.rootsentinel.model.Confidence
 import com.rootsentinel.model.DeviceProfile
@@ -57,6 +58,7 @@ class DetectorEngine(private val context: Context) {
         // native 输出的跨视角矛盾，必须交给评分器
         val nativeCrosses = mutableListOf<com.rootsentinel.model.CrossCheck>()
         var nativeVersion = ""
+        var nativeProtocolError = false
 
         try {
             val cb = if (onModule != null || onItem != null) {
@@ -85,6 +87,7 @@ class DetectorEngine(private val context: Context) {
             items += parsed.items
             nativeCrosses += parsed.crosses
             nativeVersion = parsed.version
+            nativeProtocolError = parsed.protocolError
         } catch (t: Throwable) {
             nativeError = "${t.javaClass.simpleName}: ${t.message}"
         }
@@ -110,6 +113,38 @@ class DetectorEngine(private val context: Context) {
             onItem?.invoke(
                 "Z.NATIVE_FAIL", "native 扫描失败，本次结果不完整",
                 "CRITICAL", "UNKNOWN", "X",
+            )
+        }
+
+        // v2.22.42：版本与协议完整性（P1-02 / P2-04）。
+        // jniLibs 是预编译产物：.so 与 Java 不是同一版构建时，
+        // 证据语义可能已经变了，结果不可信；协议里出现未知类别
+        // 同理。两者各落一条 SKIPPED 证据，由评分器强制
+        // INCOMPLETE —— 绝不允许拿错位的结果给 CLEAN。
+        if (nativeError == null && nativeVersion != RootSentinelVersion.NAME) {
+            items += Evidence(
+                id = "Z.VERSION",
+                category = Category.CROSSCHECK,
+                severity = Severity.HIGH,
+                confidence = Confidence.HIGH,
+                verdict = Verdict.UNKNOWN,
+                state = EvidenceState.SKIPPED,
+                title = "native 版本与应用版本不一致",
+                detail = "native=$nativeVersion, app=${RootSentinelVersion.NAME}",
+                fpNote = "打包的 .so 与源码版本脱节时出现；本次结论不可信",
+            )
+        }
+        if (nativeError == null && nativeProtocolError) {
+            items += Evidence(
+                id = "Z.PROTOCOL",
+                category = Category.CROSSCHECK,
+                severity = Severity.HIGH,
+                confidence = Confidence.HIGH,
+                verdict = Verdict.UNKNOWN,
+                state = EvidenceState.SKIPPED,
+                title = "native 协议异常（未知证据类别）",
+                detail = "至少一条证据的类别无法识别，已降级为 UNKNOWN；" +
+                    "native 与 Java 的协议版本可能不匹配",
             )
         }
 

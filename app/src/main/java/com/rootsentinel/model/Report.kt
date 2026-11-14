@@ -624,6 +624,11 @@ object ScoringModel {
         val cancelledScan = deduped.any {
             it.id == "Z.CANCELLED" || it.id.startsWith("Z.CANCELLED.")
         }
+        // v2.22.42：版本/协议完整性（P1-02 / P2-04）。
+        // .so 与应用版本错位、或协议出现未知类别时，证据语义
+        // 不可信，与取消扫描同级处理：强制 INCOMPLETE。
+        val versionMismatch = deduped.any { it.id == "Z.VERSION" }
+        val protocolBroken = deduped.any { it.id == "Z.PROTOCOL" }
         // tooFew 不再比固定基线，而是比「本设备适用的项数」。
         // 一台精简 ROM 上适用项本来就少，不该被判成检测面不足。
         val applicableCount = deduped.size - cntNotApplicable
@@ -642,6 +647,12 @@ object ScoringModel {
         }
         if (cancelledScan) {
             notes += "扫描被用户取消，部分必需阶段未执行，本次不下「干净」结论"
+        }
+        if (versionMismatch) {
+            notes += "native 版本与应用版本不一致（打包的 .so 不是同一版构建），本次结果不可信"
+        }
+        if (protocolBroken) {
+            notes += "native 协议出现未知证据类别，相关证据已降级，本次不下完整结论"
         }
 
         // ---------------------------------------------------------- 覆盖率降分
@@ -684,6 +695,7 @@ object ScoringModel {
             //    都不能翻译成「没问题」—— 一律 INCOMPLETE。
             //    v2.4.1：把 ERROR / TIMEOUT / 阶段异常也纳入门槛。
             nativeFailed || stageFailed > 0 || errored > 0 || tooFew || cancelledScan ||
+                versionMismatch || protocolBroken ||
                 (items.isEmpty() && crosses.isEmpty()) -> Grade.INCOMPLETE
 
             // ③ 检测跑完了，但可读率太低，同样不下「干净」结论

@@ -23,6 +23,8 @@ object NativeReportParser {
         val crosses: List<CrossCheck> = emptyList(),
         val version: String = "",
         val error: String? = null,
+        /** 协议出现未知证据类别等异常（v2.22.42，P2-04） */
+        val protocolError: Boolean = false,
     )
 
     fun parse(json: String): Parsed {
@@ -75,14 +77,24 @@ object NativeReportParser {
                     error = "协议错误：items 是空数组（native 未产出任何检测结果）",
                 )
             }
+            var sawUnknownCategory = false
             for (i in 0 until arr.length()) {
                 val o = arr.getJSONObject(i)
+                // v2.22.42（P2-04）：未知类别不再默认落 ARTIFACT。
+                // ARTIFACT 属 ROOT 维度 —— native 新增类别或协议
+                // 版本错位时，一条不认识的 HIT 会被当成 Root 证据。
+                // 现在：类别码无法识别 → 证据降级为 UNKNOWN 并落到
+                // CROSSCHECK，同时置 protocolError，由调度层把整次
+                // 扫描标记为不完整。
+                val cat = categoryOf(o.optString("category"))
+                if (cat == null) sawUnknownCategory = true
                 items += Evidence(
                     id = o.optString("id"),
-                    category = categoryOf(o.optString("category")),
+                    category = cat ?: Category.CROSSCHECK,
                     severity = severityOf(o.optString("severity")),
                     confidence = confidenceOf(o.optString("confidence")),
-                    verdict = verdictOf(o.optString("verdict")),
+                    verdict = if (cat == null) Verdict.UNKNOWN
+                        else verdictOf(o.optString("verdict")),
                     heuristic = o.optBoolean("heuristic"),
                     title = o.optString("title"),
                     detail = o.optString("detail"),
@@ -125,7 +137,10 @@ object NativeReportParser {
                 }
             }
 
-            Parsed(items = items, profile = profile, crosses = crosses, version = version)
+            Parsed(
+                items = items, profile = profile, crosses = crosses,
+                version = version, protocolError = sawUnknownCategory,
+            )
         } catch (t: Throwable) {
             Parsed(
                 items = emptyList(),
@@ -135,7 +150,7 @@ object NativeReportParser {
         }
     }
 
-    private fun categoryOf(code: String): Category = when (code) {
+    private fun categoryOf(code: String): Category? = when (code) {
         "A" -> Category.ARTIFACT
         "B" -> Category.PROPERTY
         "C" -> Category.MOUNT
@@ -146,7 +161,7 @@ object NativeReportParser {
         "H" -> Category.HIDING
         "I" -> Category.INTEGRITY
         "X" -> Category.CROSSCHECK
-        else -> Category.ARTIFACT
+        else -> null
     }
 
     private fun severityOf(s: String): Severity = when (s) {

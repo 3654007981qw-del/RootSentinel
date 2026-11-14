@@ -219,12 +219,47 @@ void checkKernelDeep(ScanReport& r) {
                 r.add(std::move(u));
             }
         } else {
-            Evidence e = makeHit(RSs("F.FTRACE"), Category::KERNEL,
-                                 Severity::MEDIUM, Confidence::MEDIUM,
-                                 RSs("ftrace 可过滤函数表可读"));
-            e.addVector(RSs("lines"), std::to_string(split(trace, '\n').size()));
-            e.detail = RSs("可读意味着可对内核函数做 kprobe 插桩");
-            r.add(std::move(e));
+            // v2.22.42（P2-01）：函数表可读 ≠ 正在被 hook。
+            // available_filter_functions 只是「内核支持过滤哪些函数」
+            // 的目录，正常内核也可读、也可很长。只有活动证据才 HIT：
+            // current_tracer 不是 nop，或 enabled_functions 非空。
+            const auto tracerRaw = readFile(RSs("/sys/kernel/tracing/current_tracer"), 4096);
+            const auto enabled = readFile(RSs("/sys/kernel/tracing/enabled_functions"), 64 * 1024);
+            std::string tracerName;
+            if (!tracerRaw.empty()) {
+                tracerName = split(tracerRaw, '\n')[0];
+                while (!tracerName.empty() &&
+                       (tracerName.back() == ' ' || tracerName.back() == '\r' ||
+                        tracerName.back() == '\t')) {
+                    tracerName.pop_back();
+                }
+            }
+            const bool tracerActive = !tracerName.empty() && tracerName != RSs("nop");
+            if (tracerActive || !enabled.empty()) {
+                Evidence e = makeHit(RSs("F.FTRACE"), Category::KERNEL,
+                                     Severity::MEDIUM, Confidence::MEDIUM,
+                                     RSs("ftrace 存在活动插桩"));
+                e.addVector(RSs("tracer"), tracerName);
+                e.addVector(RSs("enabled_lines"),
+                            std::to_string(split(enabled, '\n').size()));
+                e.detail = RSs("current_tracer 已启用或有函数被 ftrace 启用，"
+                               "存在内核级插桩活动");
+                r.add(std::move(e));
+            } else if (!tracerRaw.empty()) {
+                Evidence e = makePass(RSs("F.FTRACE"), Category::KERNEL,
+                                      RSs("ftrace 函数表可读但无活动 tracer"));
+                e.addVector(RSs("lines"), std::to_string(split(trace, '\n').size()));
+                e.addVector(RSs("tracer"), tracerName);
+                e.detail = RSs("可过滤函数表可读只是能力暴露，"
+                               "current_tracer=nop 且无已启用函数，不构成 hook 证据");
+                r.add(std::move(e));
+            } else {
+                Evidence u = makeUnknown(RSs("F.FTRACE"), Category::KERNEL,
+                                         Severity::LOW,
+                                         RSs("ftrace 函数表可读，但活动状态不可读，无法判定"));
+                u.addVector(RSs("lines"), std::to_string(split(trace, '\n').size()));
+                r.add(std::move(u));
+            }
         }
     }
 }

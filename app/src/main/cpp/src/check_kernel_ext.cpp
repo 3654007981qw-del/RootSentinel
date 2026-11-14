@@ -89,8 +89,9 @@ void checkKernelExt(ScanReport& r) {
         const int n = countDir(RSs("/sys/fs/bpf"));
         if (n == 0) {
             // v2.22.41：countDir 在目录不可枚举时也返回 0，
-            // 「空目录」与「读不到」不能混为一谈：
-            // 权限被拒 → UNKNOWN；不存在 / 可读且为空 → PASS。
+            // 「空目录」与「读不到」不能混为一谈。
+            // v2.22.42（P2-02）：再细分 ENOENT —— bpffs 没挂载
+            // 不等于没有 BPF 程序，同样只能 UNKNOWN。
             const int ae = accessErrnoRaw(RSs("/sys/fs/bpf"), 4 /* R_OK */);
             if (ae == EACCES || ae == EPERM) {
                 Evidence u = makeUnknown(RSs("F.BPF_PROGS"), Category::KERNEL,
@@ -98,27 +99,52 @@ void checkKernelExt(ScanReport& r) {
                                          RSs("/sys/fs/bpf 不可读，无法确认是否存在 pinned BPF 程序"));
                 u.addVector(RSs("errno"), std::to_string(ae));
                 r.add(std::move(u));
+            } else if (ae == ENOENT) {
+                Evidence u = makeUnknown(RSs("F.BPF_PROGS"), Category::KERNEL,
+                                         Severity::LOW,
+                                         RSs("/sys/fs/bpf 不存在（bpffs 未挂载），无法枚举 pinned 程序"));
+                u.addVector(RSs("errno"), std::to_string(ae));
+                r.add(std::move(u));
             } else {
                 r.add(makePass(RSs("F.BPF_PROGS"), Category::KERNEL,
                                RSs("无 pinned BPF 程序")));
             }
         } else {
-            std::vector<std::string> names;
+            // v2.22.42（P2-02）：先分系统自带与未知来源。
+            // Android 自身（netd / tethering / timeinstate）会 pin
+            // 一批 BPF 程序做流量统计与管控，把它们一律当 rootkit
+            // 命中是误报源。只有出现未知来源的 pinned 程序才 HIT。
+            static const char* kSysPrefixes[] = {
+                "prog_netd", "map_netd", "netd_shared",
+                "prog_tethering", "map_tethering", "tethering_shared",
+                "prog_timeinstate", "map_timeinstate",
+            };
+            std::vector<std::string> unknownNames;
             auto es = listDirRaw(RSs("/sys/fs/bpf"));
             for (const auto& d : es) {
                 if (d.name.empty() || d.name[0] == '.') continue;
-                if (names.size() < 6) names.push_back(d.name);
+                bool sys = false;
+                for (const char* p : kSysPrefixes) {
+                    if (d.name.rfind(p, 0) == 0) { sys = true; break; }
+                }
+                if (!sys && unknownNames.size() < 6) unknownNames.push_back(d.name);
             }
-            Evidence e = makeHit(RSs("F.BPF_PROGS"), Category::KERNEL,
-                                 Severity::HIGH, Confidence::MEDIUM,
-                                 RSs("存在 pinned BPF 程序"));
-            e.addVector(RSs("count"), std::to_string(n));
-            for (const auto& s : names) e.addVector(RSs("prog"), s);
-            e.detail = RSs("pinned BPF 程序可在内核里拦截系统调用 —— "
-                           "是 eBPF rootkit 的落地形态");
-            e.fp_note = RSs("新版 Android 自己会用 BPF（网络统计、流量管控），"
-                            "需核对程序名");
-            r.add(std::move(e));
+            if (unknownNames.empty()) {
+                Evidence e = makePass(RSs("F.BPF_PROGS"), Category::KERNEL,
+                                      RSs("仅见 Android 系统自带 pinned BPF 程序"));
+                e.addVector(RSs("count"), std::to_string(n));
+                e.detail = RSs("netd / tethering / timeinstate 的流量统计与管控程序，属系统常态");
+                r.add(std::move(e));
+            } else {
+                Evidence e = makeHit(RSs("F.BPF_PROGS"), Category::KERNEL,
+                                     Severity::HIGH, Confidence::MEDIUM,
+                                     RSs("存在未知来源的 pinned BPF 程序"));
+                e.addVector(RSs("count"), std::to_string(n));
+                for (const auto& s : unknownNames) e.addVector(RSs("prog"), s);
+                e.detail = RSs("非系统自带的 pinned BPF 程序可在内核里拦截系统调用 —— "
+                               "是 eBPF rootkit 的落地形态");
+                r.add(std::move(e));
+            }
         }
     }
 

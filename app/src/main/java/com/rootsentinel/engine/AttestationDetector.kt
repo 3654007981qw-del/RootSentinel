@@ -54,6 +54,10 @@ class AttestationDetector(private val context: Context) {
                 fpNote = "模拟器、部分老设备、以及被 hook 的 Keystore 都会走到这里；" +
                     "按规则不得据此判定 root",
             )
+            // v2.22.42（P2-03）：提前返回也必须清理别名。
+            // 密钥可能已经生成成功、只是证书链没取到，
+            // 不删会在 KeyStore 里留下残留条目。
+            runCatching { keyStore.deleteEntry(alias) }
             return out
         }
 

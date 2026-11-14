@@ -181,17 +181,27 @@ void checkMagiskFamily(ScanReport& r) {
             }
         }
 
-        if (exists > 0 || denied > 0) {
+        if (exists > 0) {
             Evidence e = makeHit(s.id, Category::ARTIFACT, Severity::CRITICAL,
-                                 exists > 0 ? Confidence::HIGH : Confidence::MEDIUM,
+                                 Confidence::HIGH,
                                  s.name + RSs(" 痕迹存在"));
             for (const auto& l : lines) e.addVector(RSs("path"), l);
             e.addVector(RSs("missing"), std::to_string(missing));
-            if (exists > 0) {
-                e.detail = RSs("路径对普通 App 竟然可访问 → 权限被改过");
-            } else {
-                e.detail = RSs("路径返回 EACCES 且不在 /data/adb 下 → 目录存在");
-            }
+            e.detail = RSs("路径对普通 App 竟然可访问 → 权限被改过");
+            r.add(std::move(e));
+        } else if (denied > 0) {
+            // v2.22.42（P1-03）：EACCES-only 不再推断「目录存在」。
+            // EACCES 只说明这条路径走不通：中间目录 DAC、SELinux
+            // 路径遍历拒绝、厂商 LSM 策略在正常 ROM 上同样产生它；
+            // 多个方案共享同一拒绝原因时还会重复计分。
+            // 改判 UNKNOWN，拿到独立存在性证据才允许升 HIT。
+            Evidence e = makeUnknown(s.id, Category::ARTIFACT, Severity::LOW,
+                                     s.name + RSs(" 路径被拒绝访问（存在性未确认）"));
+            for (const auto& l : lines) e.addVector(RSs("path"), l);
+            e.addVector(RSs("denied"), std::to_string(denied));
+            e.addVector(RSs("missing"), std::to_string(missing));
+            e.detail = RSs("EACCES 可能来自中间目录权限或 SELinux 遍历拒绝，"
+                           "不作为目标存在的证据");
             r.add(std::move(e));
         } else if (missing == (int)s.paths.size()) {
             Evidence e = makePass(s.id, Category::ARTIFACT,

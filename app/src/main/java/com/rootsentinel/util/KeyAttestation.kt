@@ -53,12 +53,22 @@ object KeyAttestation {
     /**
      * 受信任的硬件证明根证书 SHA-256 指纹（证书 DER 本身，小写 hex）。
      *
-     * 空集 = 只做「链根 Subject 为 Google 证明根」的锚定（见 probe 中
-     * rootAnchored）；把 Google 发布的 Hardware Attestation Root
-     * 证书指纹填进来后，指纹钉扎随即生效，Subject 伪造的假链会被拒。
-     * 指纹必须从 Google 官方渠道核对后填写，不要凭记忆填。
+     * v2.22.42：钉扎正式启用。以下指纹由构建方在本机从 Google 官方
+     * 端点 https://android.googleapis.com/attestation/root 下载的证书
+     * DER 直接计算（2026-11-14），不是凭记忆填写：
+     *   ① RSA 根（serial f92009e853b6b045，2022-03 → 2042-03）
+     *   ② EC 根「Key Attestation CA1」（2025 年启用的新一代证明根，
+     *      2025-07 → 2035-07）
+     * 链根指纹不在此集合内 → 未锚定 → cryptoTrusted 不成立。
+     * 空集**不再**放行（v2.22.41 及之前空集 = 只看 Subject 的弱锚定，
+     * 自签伪造链能通过，属 P1 缺陷）。使用 OEM 自有证明根的设备其链根
+     * 不在集合内，证明只记 HIGH 不给 VERIFIED —— 已知取舍，后续以
+     * 可维护的 OEM 根集合扩展，不要把空集放行加回来。
      */
-    private val TRUSTED_ROOT_CERT_SHA256: Set<String> = emptySet()
+    private val TRUSTED_ROOT_CERT_SHA256: Set<String> = setOf(
+        "cedb1cb6dc896ae5ec797348bce9286753c2b38ee71ce0fbe34a9a1248800dfc",
+        "6d9db4ce6c5c0b293166d08986e05774a8776ceb525d9e4329520de12ba4bcc0",
+    )
 
     // 标签常量：context-specific [x] 的高标签号编码
     // [702] = 0x2BE → 0xBF 0x85 0x3E
@@ -74,8 +84,10 @@ object KeyAttestation {
         val chainLength: Int = 0,
         /** 证书里携带的 attestationChallenge 原文 */
         val challenge: ByteArray? = null,
-        /** 0 = Software, 1 = TEE, 2 = StrongBox */
+        /** 0 = Software, 1 = TEE, 2 = StrongBox（attestationSecurityLevel） */
         val securityLevel: Int = -1,
+        /** keymasterSecurityLevel，与 securityLevel 交叉核对（v2.22.42） */
+        val keymasterSecurityLevel: Int = -1,
         /** 0 = Verified, 1 = SelfSigned, 2 = Unverified, 3 = Failed */
         val verifiedBootState: Int = -1,
         val deviceLocked: Boolean? = null,
@@ -207,23 +219,29 @@ object KeyAttestation {
             // securityLevel: 0 = Software, 1 = TEE, 2 = StrongBox
             // 软件级证明（Software）由用户态实现，任何 root 框架都能伪造，
             // 不能作为启动链可信的依据。
-            val hardwareBacked = parsed.securityLevel >= 1
+            // v2.22.42：keymaster 交叉核对。attestationSecurityLevel
+            // 声称 TEE/StrongBox，但 keymasterSecurityLevel = Software(0)
+            // 时两字段矛盾 —— 至少有一侧被伪造，硬件级不成立。
+            // keymaster 解析不到（-1，老式/异常编码）时不单独否决，
+            // 由 attestation 侧与链校验兜底。
+            val hardwareBacked = parsed.securityLevel >= 1 &&
+                parsed.keymasterSecurityLevel != 0
 
             // v2.22.41：链根锚定也进公式。
             // 之前 rootIsGoogle 只算不用 —— verifyChain 只证明「链自洽」
             // （含根证书自签自验），一份 Subject 里写着 Google 的自造链
-            // 照样能让 cryptoTrusted = true。现在链根必须是已知的
-            // Google 硬件证明根；填了 TRUSTED_ROOT_CERT_SHA256 后
-            // 还要过指纹钉扎这一关。
+            // 照样能让 cryptoTrusted = true。
+            // v2.22.42：锚定 = 链根指纹命中钉扎集合（见
+            // TRUSTED_ROOT_CERT_SHA256）。空集不再放行；rootIsGoogle
+            // 降为信息字段（展示与排查），不参与信任判定。
             val rootCertSha256 = (chain.lastOrNull() as? X509Certificate)?.let { root ->
                 runCatching {
                     hex(java.security.MessageDigest.getInstance("SHA-256")
                         .digest(root.encoded))
                 }.getOrNull()
             }
-            val rootAnchored = rootIsGoogle &&
-                (TRUSTED_ROOT_CERT_SHA256.isEmpty() ||
-                    (rootCertSha256 != null && rootCertSha256 in TRUSTED_ROOT_CERT_SHA256))
+            val rootAnchored = rootCertSha256 != null &&
+                rootCertSha256 in TRUSTED_ROOT_CERT_SHA256
 
             val cryptoTrusted = hardwareBacked &&
                 challengeMatch == true &&
@@ -342,6 +360,7 @@ object KeyAttestation {
 
         val seq = Der(outer.second)
         var securityLevel = -1
+        var keymasterSecurityLevel = -1
         var osVersion = -1
         var patchLevel = -1
         var deviceLocked: Boolean? = null
@@ -372,6 +391,16 @@ object KeyAttestation {
                 1 -> {
                     if (tag == 0x0A) {   // ENUMERATED
                         securityLevel = Der(value).readIntValue(value.size)
+                    }
+                }
+                // 3: keymasterVersion  INTEGER
+                // 4: keymasterSecurityLevel ENUMERATED ← v2.22.42 新增：
+                // 与 attestationSecurityLevel 交叉核对（见 probe 的
+                // hardwareBacked）。attestation 自称 TEE 而 keymaster
+                // 却在 Software 层 = 两字段互相矛盾，证明不可信。
+                3 -> {
+                    if (tag == 0x0A) {   // ENUMERATED
+                        keymasterSecurityLevel = Der(value).readIntValue(value.size)
                     }
                 }
                 // 6: softwareEnforced AuthorizationList
@@ -413,6 +442,7 @@ object KeyAttestation {
         return Result(
             challenge = challengeBytes,
             securityLevel = securityLevel,
+            keymasterSecurityLevel = keymasterSecurityLevel,
             verifiedBootState = bootState,
             deviceLocked = deviceLocked,
             verifiedBootHash = bootHash,
@@ -482,17 +512,29 @@ object KeyAttestation {
     private fun verifyChain(chain: Array<out java.security.cert.Certificate>): Boolean? {
         if (chain.isEmpty()) return null
         return try {
+            // v2.22.42：路径校验补齐 —— 之前只做逐级验签，
+            // 过期证书、非 CA 证书充当签发者一样能过。
+            // 现在每张证书必须在有效期内；除叶子外每张签发者
+            // 必须是 CA（BasicConstraints >= 0），且 KeyUsage
+            // 若存在必须含 keyCertSign。
+            for (c in chain) {
+                (c as? X509Certificate)?.checkValidity() ?: return false
+            }
             for (i in 0 until chain.size - 1) {
                 val cur = chain[i] as? X509Certificate ?: return false
                 val issuer = chain[i + 1] as? X509Certificate ?: return false
+                if (issuer.basicConstraints < 0) return false
+                val ku = issuer.keyUsage
+                if (ku != null && (ku.size <= 5 || !ku[5])) return false
                 cur.verify(issuer.publicKey)
             }
-            // 自签根：自己验自己
+            // 自签根：自己验自己，且根自身也必须是 CA
             val root = chain.last() as? X509Certificate ?: return false
+            if (root.basicConstraints < 0) return false
             root.verify(root.publicKey)
             true
         } catch (t: Throwable) {
-            // SignatureException / InvalidKeyException / CertPathValidatorException
+            // SignatureException / InvalidKeyException / CertificateExpiredException 等
             false
         }
     }
