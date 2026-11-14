@@ -81,13 +81,13 @@ AGP 不使用 `externalNativeBuild`，因为 NDK 自带的 clang 是 x86_64、
 在本机跑不起来。原生库仍由 `native.sh` 用**系统 clang + NDK sysroot**交叉编译：
 
 ```sh
-bash native.sh                    # 三个 ABI → out/<abi>/librootsentinel.so
-cp out/arm64-v8a/librootsentinel.so app/src/main/jniLibs/arm64-v8a/
-# armeabi-v7a / x86_64 同理
+bash native.sh                    # 三个 ABI 直接写 app/src/main/jniLibs/<abi>/
 ./gradlew :app:assembleRelease
 ```
 
-改了 C++ 之后：`native.sh` → 复制 `.so` → 重新 assemble。
+`native.sh` 没有 out/ 中间目录，产物直达 jniLibs（v2.22.44 对
+文档做了对齐，第四份审查 P2-12）。改了 C++ 之后：跑一遍
+`native.sh` 再重新 assemble 即可，不需要手动复制。
 
 ## 六、目录
 

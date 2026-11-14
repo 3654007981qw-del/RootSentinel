@@ -35,13 +35,29 @@ import java.security.cert.X509Certificate
  *     teeEnforced              AuthorizationList,
  *   }
  *
- *   AuthorizationList 里用 context-specific 标签（高标签号形式）：
- *     [702] osVersion          INTEGER
- *     [704] deviceLocked       BOOLEAN
- *     [709] verifiedBootState  ENUMERATED
- *     [710] verifiedBootHash   OCTET STRING
- *     [718] vendorPatchLevel   INTEGER
- *     [719] bootPatchLevel     INTEGER
+ *   AuthorizationList 里用 context-specific 标签（高标签号形式），
+ *   且全部是 EXPLICIT 编码（外层内容是内层类型的完整 DER）：
+ *     [702] origin                 INTEGER
+ *     [704] rootOfTrust            RootOfTrust（SEQUENCE 包装，见下）
+ *     [705] osVersion              INTEGER
+ *     [706] osPatchLevel           INTEGER
+ *     [709] attestationApplicationId OCTET STRING
+ *     [710] attestationIdBrand     OCTET STRING
+ *     [718] vendorPatchLevel       INTEGER
+ *     [719] bootPatchLevel         INTEGER
+ *
+ *   RootOfTrust ::= SEQUENCE {
+ *     verifiedBootKey   [0] EXPLICIT OCTET STRING,
+ *     deviceLocked      [1] EXPLICIT BOOLEAN,
+ *     verifiedBootState [2] EXPLICIT ENUMERATED,  ← Verified(0)/SelfSigned(1)/Unverified(2)/Failed(3)
+ *     verifiedBootHash  [3] EXPLICIT OCTET STRING,
+ *   }
+ *
+ *   v2.22.44 按官方结构重写（第四份审查 P1-01）：v2.22.43 及之前
+ *   把 [704] 直接当 deviceLocked、[709]/[710] 当启动状态/哈希，
+ *   且从不剥 EXPLICIT 内层 TLV —— deviceLocked 因此恒为 true
+ *   （[704] 内容首字节恒是 SEQUENCE 标签 0x30），真解锁设备会被
+ *   下游以 VERIFIED 置信度报成「已锁定」。旧映射见 git 历史。
  *
  * 注意：没有第三方 ASN.1 库，下面是手写的极简 DER 读取器，
  * 只处理这个结构会用到的类型。
@@ -70,14 +86,20 @@ object KeyAttestation {
         "6d9db4ce6c5c0b293166d08986e05774a8776ceb525d9e4329520de12ba4bcc0",
     )
 
-    // 标签常量：context-specific [x] 的高标签号编码
-    // [702] = 0x2BE → 0xBF 0x85 0x3E
-    private const val TAG_OS_VERSION        = 0xBF853E
-    private const val TAG_DEVICE_LOCKED     = 0xBF8540
-    private const val TAG_VERIFIED_BOOT_STATE = 0xBF8545
-    private const val TAG_VERIFIED_BOOT_HASH  = 0xBF8546
-    private const val TAG_VENDOR_PATCH      = 0xBF854E
-    private const val TAG_BOOT_PATCH        = 0xBF854F
+    // 标签常量：context-specific [x] 的高标签号编码（官方编号）
+    // [702] = 0xBF 0x85 0x3E，余类推
+    private const val TAG_ORIGIN            = 0xBF853E  // [702]
+    private const val TAG_ROOT_OF_TRUST     = 0xBF8540  // [704]
+    private const val TAG_OS_VERSION        = 0xBF8541  // [705]
+    private const val TAG_OS_PATCH          = 0xBF8542  // [706]
+    private const val TAG_VENDOR_PATCH      = 0xBF854E  // [718]
+    private const val TAG_BOOT_PATCH        = 0xBF854F  // [719]
+
+    // RootOfTrust 子字段标签（context-specific，单字节）
+    private const val ROT_TAG_BOOT_KEY      = 0xA0  // [0]
+    private const val ROT_TAG_DEVICE_LOCKED = 0xA1  // [1]
+    private const val ROT_TAG_BOOT_STATE    = 0xA2  // [2]
+    private const val ROT_TAG_BOOT_HASH     = 0xA3  // [3]
 
     data class Result(
         val supported: Boolean = false,
@@ -460,6 +482,19 @@ object KeyAttestation {
         var bootState: Int = -1,
     )
 
+    /** EXPLICIT 字段的内容是内层类型的完整 TLV，先剥一层再取内容字节 */
+    private fun unwrapExplicit(value: ByteArray): ByteArray? {
+        if (value.isEmpty()) return null
+        return Der(value).readTlv()?.second
+    }
+
+    /** EXPLICIT INTEGER / ENUMERATED → Int；结构异常返回 -1 */
+    private fun unwrapExplicitInt(value: ByteArray): Int {
+        val inner = unwrapExplicit(value) ?: return -1
+        if (inner.isEmpty()) return -1
+        return Der(inner).readIntValue(inner.size)
+    }
+
     private fun parseAuthList(body: ByteArray): AuthParsed {
         val out = AuthParsed()
         val der = Der(body)
@@ -471,26 +506,51 @@ object KeyAttestation {
 
             when (tag) {
                 TAG_OS_VERSION -> {
-                    out.osVersion = Der(value).readIntValue(value.size)
+                    out.osVersion = unwrapExplicitInt(value)
                 }
-                TAG_VERIFIED_BOOT_STATE -> {
-                    out.bootState = Der(value).readIntValue(value.size)
-                }
-                TAG_DEVICE_LOCKED -> {
-                    if (value.isNotEmpty()) {
-                        out.deviceLocked = (value[0].toInt() != 0)
-                    }
-                }
-                TAG_VERIFIED_BOOT_HASH -> {
-                    if (value.size == 32) out.bootHash = value
-                }
-                TAG_VENDOR_PATCH, TAG_BOOT_PATCH -> {
-                    val v = Der(value).readIntValue(value.size)
+                TAG_OS_PATCH, TAG_VENDOR_PATCH, TAG_BOOT_PATCH -> {
+                    val v = unwrapExplicitInt(value)
                     if (v > out.patchLevel) out.patchLevel = v
                 }
+                TAG_ROOT_OF_TRUST -> {
+                    parseRootOfTrust(value, out)
+                }
+                // [702] origin、[709] attestationApplicationId、
+                // [710] attestationIdBrand 等：本解析器不用，跳过。
+                // 注意 [709]/[710] 不是启动状态/哈希（旧版误读点）。
             }
         }
         return out
+    }
+
+    /**
+     * RootOfTrust 在 [704] 里是 EXPLICIT 包装：内容 = SEQUENCE 的完整 TLV，
+     * 子字段 [0..3] 各自又是 EXPLICIT，要剥两层。
+     */
+    private fun parseRootOfTrust(value: ByteArray, out: AuthParsed) {
+        val seqTlv = Der(value).readTlv() ?: return
+        if ((seqTlv.first and 0xFF) != 0x30) return  // 不是 SEQUENCE，结构异常
+        val der = Der(seqTlv.second)
+        while (!der.eof()) {
+            val tlv = der.readTlv() ?: break
+            val inner = unwrapExplicit(tlv.second) ?: continue
+            when (tlv.first and 0xFF) {
+                ROT_TAG_DEVICE_LOCKED -> {
+                    if (inner.isNotEmpty()) {
+                        out.deviceLocked = (inner[0].toInt() != 0)
+                    }
+                }
+                ROT_TAG_BOOT_STATE -> {
+                    if (inner.isNotEmpty()) {
+                        out.bootState = Der(inner).readIntValue(inner.size)
+                    }
+                }
+                ROT_TAG_BOOT_HASH -> {
+                    if (inner.size == 32) out.bootHash = inner
+                }
+                // [0] verifiedBootKey：只用于与 vbmeta 摘要比对，本解析不用
+            }
+        }
     }
 
     /**

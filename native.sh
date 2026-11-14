@@ -402,7 +402,9 @@ build_with_cmake() {
 
 # v2.22.43：入库的 .so 一律 strip（审查 P2-08）。之前仓库里的
 # 预置库带完整符号表 —— 体积白白放大，内部符号名也全部暴露。
-# 找不到 llvm-strip 时只警告不失败（打包管线侧还会再 strip 一次）。
+# v2.22.44（审查 P3-01）：strip 改为失败关闭 —— 找不到 llvm-strip
+# 或 strip 失败都直接中止构建，不再只警告。确实要在无 strip 的
+# 环境编临时库时，显式 RS_ALLOW_UNSTRIPPED=1 放行。
 strip_so() {
     local so="$1"
     local s=""
@@ -414,9 +416,15 @@ strip_so() {
         done
     fi
     if [ -n "$s" ]; then
-        "$s" "$so" 2>/dev/null || echo "[native] 警告：strip 失败：$so" >&2
+        if ! "$s" "$so" 2>/dev/null; then
+            echo "[native] 错误：strip 失败：$so" >&2
+            exit 1
+        fi
+    elif [ "${RS_ALLOW_UNSTRIPPED:-0}" = "1" ]; then
+        echo "[native] 警告：未找到 llvm-strip，.so 未 strip（RS_ALLOW_UNSTRIPPED=1）：$so" >&2
     else
-        echo "[native] 警告：未找到 llvm-strip，.so 未 strip：$so" >&2
+        echo "[native] 错误：未找到 llvm-strip，中止构建（临时放行：RS_ALLOW_UNSTRIPPED=1）" >&2
+        exit 1
     fi
 }
 
@@ -435,8 +443,10 @@ echo "[native] RS_VERSION = $RS_VERSION_STR"
 # → 都没有则不注入，但必须明确警告，不再静默缺失。
 if [ -z "${RS_SIGNER_SHA256:-}" ] && [ -n "${RS_KS_PATH:-}" ] && [ -n "${RS_KS_ALIAS:-}" ] \
     && command -v keytool >/dev/null 2>&1; then
+    # v2.22.44（P2-13）：密码改走 -storepass:env，不进 argv
+    # （/proc/<pid>/cmdline 对同 uid 进程可读）。
     _fp=$(keytool -list -v -keystore "$RS_KS_PATH" -alias "$RS_KS_ALIAS" \
-        -storepass "${RS_KS_PASS:-}" 2>/dev/null \
+        -storepass:env RS_KS_PASS 2>/dev/null \
         | grep -m1 'SHA256:' | sed 's/.*SHA256://' | tr -d ':[:space:]')
     if [ -n "$_fp" ] && [ "${#_fp}" -eq 64 ]; then
         RS_SIGNER_SHA256="$_fp"

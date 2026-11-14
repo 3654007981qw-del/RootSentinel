@@ -18,8 +18,11 @@ namespace rs {
 
 namespace {
 
-// STATX_ATTR_VERITY：文件受 fs-verity 保护
-constexpr uint64_t kStatxAttrVerity = 0x00200000ULL;
+// STATX_ATTR_VERITY：文件受 fs-verity 保护。
+// v2.22.44 修正（第四份审查 P1-02）：之前误写 0x00200000 —— 那是
+// STATX_ATTR_DAX 的值；Linux UAPI 里 VERITY 是 0x00100000。
+// 结果是这一直在测 DAX 位：真 verity 文件测不出来，DAX 文件被误报。
+constexpr uint64_t kStatxAttrVerity = 0x00100000ULL;
 // STATX_ATTR_IMMUTABLE / APPEND
 constexpr uint64_t kStatxAttrImmutable = 0x00000010ULL;
 
@@ -83,10 +86,14 @@ void checkFsDeep(ScanReport& r) {
             if (!statOf(pr.first, x)) continue;
             if (!statOf(pr.second, y)) continue;
             ++checked;
-            if (x.ino != y.ino) {
+            // v2.22.44（P2-04）：文件身份是 (st_dev, st_ino) 二元组，
+            // 只比 inode 会漏掉跨设备同号 inode 的重定向。
+            if (x.ino != y.ino || x.dev != y.dev) {
                 ++mismatched;
-                detailLines.push_back(pr.first + RSs(": ") +
+                detailLines.push_back(pr.first + RSs(": dev/ino ") +
+                                      std::to_string(x.dev) + RSs("/") +
                                       std::to_string(x.ino) + RSs(" != ") +
+                                      std::to_string(y.dev) + RSs("/") +
                                       std::to_string(y.ino));
             }
         }
@@ -96,13 +103,13 @@ void checkFsDeep(ScanReport& r) {
                               RSs("/proc/self/root 不可访问")));
         } else if (mismatched == 0) {
             Evidence e = makePass(RSs("C.SAME_INODE"), Category::MOUNT,
-                                  RSs("直接路径与 /proc/self/root 的 inode 一致"));
+                                  RSs("直接路径与 /proc/self/root 的 dev/ino 一致"));
             e.addVector(RSs("checked"), std::to_string(checked));
             r.add(std::move(e));
         } else {
             Evidence e = makeHit(RSs("C.SAME_INODE"), Category::CROSSCHECK,
                                  Severity::CRITICAL, Confidence::HIGH,
-                                 RSs("同一文件在不同路径下 inode 不同"));
+                                 RSs("同一文件在不同路径下 dev/ino 不同"));
             for (const auto& d : detailLines) e.addVector(RSs("mismatch"), d);
             e.detail = RSs("路径级隐藏会露出这个裂缝");
             r.add(std::move(e));
@@ -136,8 +143,22 @@ void checkFsDeep(ScanReport& r) {
                 ++unreadable;
                 continue;
             }
-            const bool verity = (sx.stx_attributes & kStatxAttrVerity) != 0;
-            const bool immut = (sx.stx_attributes & kStatxAttrImmutable) != 0;
+            // v2.22.44（P1-02）：先看 stx_attributes_mask —— 内核/文件
+            // 系统不报告某个属性时，对应位恒为 0，那是「不可观测」，
+            // 不是「属性缺失」。两个属性都不可观测的文件按 unreadable
+            // 计；只支持其一时只按其一判定。
+            const bool verityObservable =
+                (sx.stx_attributes_mask & kStatxAttrVerity) != 0;
+            const bool immutObservable =
+                (sx.stx_attributes_mask & kStatxAttrImmutable) != 0;
+            if (!verityObservable && !immutObservable) {
+                ++unreadable;
+                continue;
+            }
+            const bool verity = verityObservable &&
+                ((sx.stx_attributes & kStatxAttrVerity) != 0);
+            const bool immut = immutObservable &&
+                ((sx.stx_attributes & kStatxAttrImmutable) != 0);
             if (verity || immut) ++withAttr;
             else ++withoutAttr;
 

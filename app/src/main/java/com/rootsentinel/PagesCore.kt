@@ -18,6 +18,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -510,6 +512,7 @@ fun ReportPage(
 ) {
     val c = MiuixTheme.colorScheme
     val ctx = LocalContext.current
+    val exportScope = rememberCoroutineScope()
 
     if (result == null) {
         PageScroll {
@@ -697,7 +700,13 @@ fun ReportPage(
             }
             Spacer(Modifier.width(12.dp))
             GlassButton(
-                onClick = { JsonExporter.export(ctx, result) },
+                // v2.22.44（P2-08）：导出不在点击回调（主线程）里
+                // 同步执行，改走 IO 协程。
+                onClick = {
+                    exportScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                        JsonExporter.export(ctx, result)
+                    }
+                },
                 modifier = Modifier.weight(1f),
             ) {
                 Text("导出 JSON", fontSize = 15.sp)

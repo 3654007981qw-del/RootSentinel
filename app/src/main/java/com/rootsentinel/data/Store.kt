@@ -2,7 +2,6 @@ package com.rootsentinel.data
 
 import android.content.Context
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.rootsentinel.engine.DetectorEngine
@@ -139,30 +138,11 @@ class SettingsStore(context: Context) {
     // 之前直接 get/set SharedPreferences，那不是 State，
     // 所以「点了开关界面不动」—— 其实值已经改了。
 
-    /** 0 = 跟随系统，1 = 深色，2 = 浅色 */
-    private var _themeMode by mutableIntStateOf(sp.getInt("themeMode", 0))
-    var themeMode: Int
-        get() = _themeMode
-        set(v) {
-            _themeMode = v
-            sp.edit().putInt("themeMode", v).apply()
-        }
-
-    private var _animations by mutableStateOf(sp.getBoolean("animations", true))
-    var animations: Boolean
-        get() = _animations
-        set(v) {
-            _animations = v
-            sp.edit().putBoolean("animations", v).apply()
-        }
-
-    private var _haptics by mutableStateOf(sp.getBoolean("haptics", true))
-    var haptics: Boolean
-        get() = _haptics
-        set(v) {
-            _haptics = v
-            sp.edit().putBoolean("haptics", v).apply()
-        }
+    // v2.22.44 删除（第四份审查 P2-10）：themeMode / animations /
+    // haptics 三个设置只存不用 —— themeMode 全仓零消费者，另两个
+    // 只有设置页自己在读。留着只会让用户以为开关生效。等真有对应
+    // 功能（主题切换 / 动效与震动接线）时连功能一起加回来。
+    // SharedPreferences 里的旧键保留不管，不影响任何东西。
 
     /** 扫描完成后自动导出 JSON。默认关闭。 */
     private var _autoExport by mutableStateOf(sp.getBoolean("autoExport", false))

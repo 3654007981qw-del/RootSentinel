@@ -1,5 +1,45 @@
 # Changelog
 
+## 2.22.44
+
+基于对 2.22.43 的第四份独立静态审查（4 条 P1 + 14 条 P2 + P3，经逐条回源码核查：17 条属实、3 条部分属实、0 条不属实；其中 P1-01 经核查比审查写的更严重，§9 附带的「CMake 源清单重复条目」经复核不成立——syscall_asm.cpp 在源清单里只有一条，另一处是 set_source_files_properties 属性设置）全部修复：
+
+**P1-01 Key Attestation ASN.1 解析按官方结构重写**
+- 旧映射整体错位：[704] 是 rootOfTrust 的 EXPLICIT 包装而非 deviceLocked；[709]/[710] 是 attestationApplicationId / attestationIdBrand 而非启动状态/哈希；osVersion 实际在 [705]；且所有 EXPLICIT 字段从未剥内层 TLV。后果：deviceLocked 对一切带 rootOfTrust 的设备恒为 true——真实解锁的设备会被下游以 VERIFIED 置信度报成「已锁定」，deviceLocked=false 的 HIT 分支永不可达。
+- 现在：[704] 解包 SEQUENCE 后读 [0..3] 子字段（deviceLocked / verifiedBootState / verifiedBootHash 各归其位），osVersion 改 [705]，补 [706] osPatchLevel，全部 EXPLICIT 字段先剥内层 TLV 再取值。
+
+**P1-02 C.VERITY 常量与掩码**
+- STATX_ATTR_VERITY 误写成 DAX 的 0x00200000，改回 UAPI 的 0x00100000；判定前先查 stx_attributes_mask，两属性都不可观测的文件按不可读计，不再把「内核不报告」当「属性缺失」凑 HIT。
+
+**P1-03 跨进程白名单重建**
+- 旧白名单 54 个 ID 只有 25 个能由 native 产出（改名漂移、Java 侧项、不存在的 ID），60% 门槛要 32 项，complete 永假、强差异分支从未触发。白名单按 native 实际 ID 注册表重建为 39 项（A.KSU_NODE→F.KSU_NODE、G.BPF→G.BPF_PINNED 等改名对齐），门槛随之可达；文件头注明维护规则与对照导出命令。
+
+**P1-04 AAPT2 路径统一**
+- 本地 Maven 仓库以 settings.gradle.kts 的 /root/localMaven 为唯一真源，setup-aapt2.sh 默认目录与之对齐；删掉无人引用的 SDK extras/m2repository 副本；aapt2shim.c 的真 aapt2/qemu 路径改为占位符，由脚本按当前 SDK 配置生成。
+
+**P2 一组：结论可信度**
+- P2-01 applicabilityOf 删掉「不存在 / 未提供 / 没有该 / 缺少」裸缺失词——分不清设备不支持与数据缺口，F.KERNEL_EOL、G.ATTEST_CHAIN 的数据缺口型 UNKNOWN 不再被移出覆盖率分母。
+- P2-02 crosses 的 consistent 缺失不再默认 true（按不一致 + 协议问题处理）；证据 id 为空判协议错误并跳过该条。
+- P2-03 F.AM_PROCS 进程列表为空改 UNKNOWN（原 PASS + HIGH），与同函数不可用路径对齐。
+- P2-04 C.META_MISMATCH 换真独立视角：新增 sys::fstat_open_raw（openat + NR_fstat，三 ABI 补 NR_fstat），不再用内部先调 statx 的 fstatat_raw 自比；C.SAME_INODE 比较补上 st_dev；删 check_mount 未使用的 struct Probe。
+- P2-05 C.OVERLAY 分档：/product、/apex、/system_ext 从 HIGH 降 MEDIUM + heuristic；C.DATA_SUBMOUNT 对 /data/misc 厂商区降 LOW + heuristic。A.SU_PATH 经核查 2.22.43 已基本修好，未动。
+
+**P2 二组：应用与发布加固**
+- P2-06 autoscan / navtest / snap 三个调试 intent 加入口加 BuildConfig.DEBUG 门槛，release 恒不触发。
+- P2-07 逐项日志降级：Kotlin 逐项 Log.i → Log.d（R8 release 按现有 proguard 规则剥离）；native RS_LOG 由 INFO 降 DEBUG。扫描级汇总一行保留。
+- P2-08 两条 JSON 导出路径（自动 / 手动）移 Dispatchers.IO。
+- P2-09 MediaStore 导出检查 update() 返回值：失败删占位记录并返回 null，不再留 IS_PENDING=1 幽灵条目还报成功。
+- P2-10 删除三个无消费者设置（themeMode / animations / haptics）及设置页「交互」卡片——只存不用、误导用户。
+- P2-11 Attestation 收敛单一实现：删除旧 AttestationDetector 与「Java · 证明链」阶段（其链根判定停在 Subject 含 Google 的弱口径）；证明统一走 SafetyNetDetector → KeyAttestation，每轮扫描只生成一把证明密钥。旧实现独有的 G.ATTESTATION / G.CHAIN / G.ATTESTATION_EXT / G.ROOT_ANCHOR 四项随之移除，信息已被 G.ATTEST_CHAIN 的解析结果覆盖。
+- P2-12 BUILD-GRADLE.md 的 out/ 路径改为 jniLibs 直写口径；删 build.gradle.kts 两处死的 externalNativeBuild 配置，注明基线注入的真实路径是 native.sh。
+- P2-13 两处 keytool 调用改 -storepass:env 传密码（native.sh 与 build.gradle.kts 的 signerSha256），密码不再出现在进程 argv 里。
+- P2-14 release 构建失败关闭：任务图含 Release 任务且无正式签名凭据时直接报错，不再回退 debug 签名。
+- P3-01 native.sh 的 strip 改失败关闭：找不到 llvm-strip 或 strip 失败即中止（临时放行 RS_ALLOW_UNSTRIPPED=1）。
+
+**延期（不变）**
+- 评分适用性的结构化原因字段（UNSUPPORTED / DATA_MISSING 枚举）仍待做；本版先用关键词收敛止住误判。
+- 自动化测试与 CI 仍缺位；ASN.1 解析已按官方结构重写，DER 测试向量回归建议在有 Gradle 的环境补上。
+
 ## 2.22.43
 
 基于对 2.22.42 的第三份独立静态审查（5 条 P1 + 8 条 P2 + 风险表，经逐条复核：11 条属实，P1-04 / P2-08 各有一处结论需修正，§五时间检测"仅 30 次样本"的说法有误——实际为 64 轮取中位数）修复：

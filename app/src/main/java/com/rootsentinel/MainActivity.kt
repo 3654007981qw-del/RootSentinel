@@ -260,13 +260,19 @@ fun RootApp() {
                     // 开关存在但功能根本没实现，用户打开它什么也不会发生。
                     // 这里补上：扫描完成后按开关决定是否落盘 JSON。
                     if (settings.autoExport) {
-                        val f = runCatching {
-                            com.rootsentinel.util.JsonExporter.export(ctx, r)
-                        }.getOrNull()
-                        android.util.Log.i(
-                            "RootSentinel",
-                            "autoExport path=${f?.absolutePath ?: "null"}",
-                        )
+                        // v2.22.44（P2-08）：导出移出主线程。此前这段在
+                        // withContext(Main) 块里同步跑，JSON 构建 + 写盘
+                        // 都压在主线程上，大报告会卡界面。改走 IO 协程，
+                        // 结果只落一行日志（导出是副作用，不阻塞出报告）。
+                        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                            val f = runCatching {
+                                com.rootsentinel.util.JsonExporter.export(ctx, r)
+                            }.getOrNull()
+                            android.util.Log.i(
+                                "RootSentinel",
+                                "autoExport path=${f?.absolutePath ?: "null"}",
+                            )
+                        }
                     }
 
                     page = Page.REPORT
@@ -278,9 +284,14 @@ fun RootApp() {
     }
 
     // 调试/自动化：`am start ... --ez autoscan true` 时启动即扫描
+    // v2.22.44（P2-06）：autoscan / navtest / snap 三个调试入口全部
+    // 加 BuildConfig.DEBUG 门槛。此前 release 构建同样生效 —— 启动器
+    // Activity 是 exported 的，任何应用都能用这些 extra 拉起扫描，
+    // 叠加自动导出开关还能顺带落盘报告。现在 release 里恒不触发。
     val activity = ctx as? Activity
     LaunchedEffect(Unit) {
-        if (activity?.intent?.getBooleanExtra("autoscan", false) == true) {
+        if (BuildConfig.DEBUG &&
+            activity?.intent?.getBooleanExtra("autoscan", false) == true) {
             startScan()
         }
     }
@@ -289,7 +300,8 @@ fun RootApp() {
     // 用途：在无法注入真实触摸（通知栏劫持焦点等）的环境下，
     // 仍然能验证「切页 + 指示器弹簧 + 三块玻璃渲染」不会崩溃 / ANR / 掉帧。
     LaunchedEffect(Unit) {
-        if (activity?.intent?.getBooleanExtra("navtest", false) == true) {
+        if (BuildConfig.DEBUG &&
+            activity?.intent?.getBooleanExtra("navtest", false) == true) {
             val seq = listOf(
                 Page.SCAN, Page.REPORT, Page.HISTORY,
                 Page.SETTINGS, Page.DEVICE, Page.HOME,
@@ -307,7 +319,8 @@ fun RootApp() {
     // 由应用自己把 View 画到位图上，才能看到底栏玻璃的真实效果。
     val rootView = androidx.compose.ui.platform.LocalView.current
     LaunchedEffect(Unit) {
-        if (activity?.intent?.getBooleanExtra("snap", false) == true) {
+        if (BuildConfig.DEBUG &&
+            activity?.intent?.getBooleanExtra("snap", false) == true) {
             kotlinx.coroutines.delay(3000)
             try {
                 val w = rootView.width

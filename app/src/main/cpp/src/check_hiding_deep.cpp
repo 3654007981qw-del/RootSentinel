@@ -46,8 +46,10 @@ namespace {
 // 本轮验证这三个新检测项时就卡在这里。
 //
 // 这里只打关键结论（HIT 全打，PASS 只打一行），不刷屏。
+// v2.22.44（P2-07）：级别从 INFO 降到 DEBUG，与 Kotlin 侧逐项
+// 日志的策略对齐 —— release 默认不在 INFO 通道暴露逐项检测细节。
 #define RS_LOG(fmt, ...) \
-    __android_log_print(ANDROID_LOG_INFO, "RootSentinel", \
+    __android_log_print(ANDROID_LOG_DEBUG, "RootSentinel", \
                         "nv " fmt, ##__VA_ARGS__)
 
 // ---------------------------------------------------------------- 日期工具

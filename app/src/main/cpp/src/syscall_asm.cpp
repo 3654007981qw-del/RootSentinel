@@ -216,6 +216,30 @@ int fstatat_raw(const char* path, rawstat* out, int flags) {
     return 0;
 }
 
+// v2.22.44（P2-04）：真正独立的第二元数据视角 —— open 后对 fd 做
+// fstat。此前 fstatat_raw 内部先调 statx_，与 statx 视角同源，
+// C.META_MISMATCH 的「两视角互验」在正常路径上是自己和自己比。
+// 这里走 openat + NR_fstat 两条不同的 syscall 路径；dev 在此
+// 归一化为 (major<<32)|minor，与 statx 侧的打包口径一致。
+int fstat_open_raw(const char* path, rawstat* out) {
+    if (!out) { errno = EINVAL; return -1; }
+    int fd = openat_(path, 0 /* O_RDONLY */);
+    if (fd < 0) return -1;
+    struct stat st{};
+    long r = raw(NR_fstat, (long)fd, (long)&st, 0, 0, 0, 0);
+    close_(fd);
+    if (r != 0) { errno = (int)(-r); return -1; }
+    const uint64_t dev = (uint64_t)st.st_dev;
+    const uint64_t major = ((dev >> 8) & 0xfffULL) |
+                           ((dev >> 20) & 0xfffff000ULL);
+    const uint64_t minor = (dev & 0xffULL) |
+                           ((dev >> 12) & 0xffffff00ULL);
+    out->dev  = (major << 32) | minor;
+    out->ino  = (uint64_t)st.st_ino;
+    out->size = (uint64_t)st.st_size;
+    return 0;
+}
+
 SyscallAgreement crossCheckStat(const char* path) {
     SyscallAgreement ag{};
     static const Stub stubs[3] = {Stub::A, Stub::B, Stub::C};

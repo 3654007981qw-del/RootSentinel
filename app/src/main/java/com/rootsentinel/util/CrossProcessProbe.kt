@@ -138,35 +138,42 @@ object CrossProcessProbe {
     // 白名单里只放「读的是全局系统状态」的检测项：
     //   B 属性、F SELinux/内核、A 方案指纹、G 硬件证明
     // 明确排除：D 内存/线程/fd、X 时间、I 进程自身身份。
+    // v2.22.44 重建（第四份审查 P1-03）：旧白名单 54 个 ID 里只有 25 个
+    // 能由 native 产出 —— 其余是改名漂移（A.KSU_NODE 实为 F.KSU_NODE、
+    // G.BPF 实为 G.BPF_PINNED）、Java 侧检测项（compare 的两侧输入都是
+    // native JSON，Java 项永远不在场）和从不存在的 ID。门槛按白名单
+    // 60% 算需要 32 项，而可比较上限只有 25 —— complete 永远为 false，
+    // 跨进程强差异分支从来没被触发过。
+    //
+    // 现在的白名单按「native 实际能产出 + 读全局系统状态」重建，
+    // 维护规则：增删 native 证据 ID 时同步这里；可用
+    //   grep -rhoE 'RSs\("[A-Z]\.[A-Z_0-9]+"\)' app/src/main/cpp/src
+    // 导出 native 全部 ID 对照（白名单必须是其子集）。
     private val DETERMINISTIC_IDS = setOf(
-        // ---- A 经典痕迹：读的是文件系统与属性，与进程无关
-        "A.SU_PATH", "A.SU_BINARY", "A.MAGISK_PATH", "A.MAGISK_MOUNT",
-        "A.KSU_NODE", "A.KSU_PATH", "A.APATCH_PATH",
-        "A.DEBUG_RAMDISK", "A.MODULES_DIR", "A.INIT_SCRIPT",
-        "A.PROP_KEYWORD", "A.EMULATOR", "A.SENSOR_COUNT",
+        // ---- A 经典痕迹：文件系统全局状态
+        "A.SU_PATH", "A.DATA_ADB", "A.DEBUG_RAMDISK", "A.MODULES_DIR",
+        "A.EMULATOR",
 
-        // ---- B 属性与启动状态：全部来自 getprop，与进程无关
-        "B.TEST_KEYS", "B.DEBUGGABLE", "B.BUILD_TYPE", "B.BUILD_TAGS",
-        "B.VB_STATE", "B.FLASH_LOCKED", "B.VBMETA_DIGEST",
-        "B.PROP_TAMPER", "B.UNAME_MISMATCH", "B.UNAME_MULTI",
-        "B.SEC_PATCH", "B.PKG_VISIBLE",
+        // ---- B 属性与启动状态：全部来自 getprop
+        "B.TEST_KEYS", "B.DEBUGGABLE", "B.BUILD_TYPE", "B.VB_STATE",
+        "B.FLASH_LOCKED", "B.VBMETA_DIGEST", "B.PROP_TAMPER",
+        "B.PROP_KEYWORD", "B.UNAME_MISMATCH", "B.UNAME_MULTI",
+        "B.SEC_PATCH",
 
-        // ---- C 挂载与命名空间：读 /proc/self/mountinfo 之外的全局挂载表
-        "C.MOUNT_OVERLAY", "C.MOUNT_MAGISK", "C.MOUNT_HIDE",
-        "C.NS_DIVERGE", "C.FS_META", "C.FS_DEEP", "C.SANDBOX",
+        // ---- C 挂载与文件系统：全局挂载表与系统文件属性
+        "C.MOUNT_MULTI", "C.OVERLAY", "C.MOUNT_SOURCE", "C.STATFS",
+        "C.VERITY",
 
         // ---- F SELinux 与内核：全局状态
         "F.SELINUX_ENFORCE", "F.SELINUX_POLICY", "F.SELINUX_FILTERED",
-        "F.OVER_HIDING", "F.SELINUX_XCHECK",
-        "F.KERNEL_DIRTY", "F.KERNEL_VERSION", "F.KERNEL_TAINT",
-        "F.KERNEL_MODULE", "F.INIT_CHAIN", "F.KERNEL_EOL",
-        "F.KALLSYMS", "F.KPTR_RESTRICT",
+        "F.OVER_HIDING", "F.SELINUX_XCHECK", "F.KSU_NODE",
+        "F.KERNEL_DIRTY", "F.KERNEL_EOL", "F.KPTR_RESTRICT",
+        "F.KPROBES", "F.FTRACE", "F.BPF_PROGS", "F.TAINTED",
 
-        // ---- G 硬件证明：TEE 签名，与进程完全无关
-        "G.ATTEST_CHAIN", "G.ATTESTATION_EXT", "G.CHAIN", "G.ROOT_ANCHOR",
-        "G.STRONGBOX", "G.PERF_PARANOID", "G.BPF",
+        // ---- G 系统能力面：内核配置，与进程无关
+        "G.PERF_PARANOID", "G.BPF_PINNED", "G.BTF",
 
-        // ---- H 隐藏痕迹：读的是全局文件系统状态
+        // ---- H 隐藏痕迹：由全局证据推导
         "H.HIDING_SIGNAL",
 
         // ---- Z 方案画像：由上面各项推导，间接确定

@@ -164,7 +164,13 @@ class DetectorEngine(private val context: Context) {
             "Java · 自保护" to { SelfGuardDetector(context).collect() },
             "Java · 行为痕迹" to { JavaDetectors(context).collect() },
             "Java · ClassLoader" to { ClassLoaderDetector(context).collect() },
-            "Java · 证明链" to { AttestationDetector(context).collect() },
+            // v2.22.44（P2-11）：原「Java · 证明链」阶段已删除。
+            // 它与 SafetyNetDetector 各自生成一把证明密钥、各走一套
+            // 证书逻辑，而它的链根判定还停在「Subject 含 Google
+            // 字样」的弱口径，与 KeyAttestation 的根指纹钉扎结论
+            // 可能互相矛盾。证明统一收敛到 SafetyNetDetector →
+            // KeyAttestation 一条路径（G.ATTEST_CHAIN 等），每轮
+            // 扫描只生成一把证明密钥。
             "Java · 自校验" to { IntegrityChecker(context).collect() },
             "Java · 完整性深度" to { IntegrityDeepDetector(context).collect() },
             "Java · 硬件指纹" to { HardwareDetector(context).collect() },
@@ -214,8 +220,12 @@ class DetectorEngine(private val context: Context) {
 
             for (e in res) {
                 items += e
-                // 每一项的结论都落日志：排查“哪一项命中/哪一项没跑”时不用再猜
-                android.util.Log.i(
+                // 逐项结论日志保留，但降到 Log.d（v2.22.44，P2-07）：
+                // proguard 的 assumenosideeffects 会在 R8 release 里
+                // 把 v/d 全部剥掉，逐项设备状态不再默认进 release
+                // 日志；需要排查时用 debug 构建看。扫描级汇总日志
+                // （grade/分数一行）维持 Log.i 不变。
+                android.util.Log.d(
                     "RootSentinel",
                     "ev ${e.id} ${e.verdict.name} ${e.severity.name} ${e.title.take(70)}",
                 )

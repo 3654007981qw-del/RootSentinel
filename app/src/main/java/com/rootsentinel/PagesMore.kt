@@ -253,34 +253,6 @@ fun SettingsPage(
     val c = MiuixTheme.colorScheme
 
     PageScroll {
-        SmallTitle("交互")
-        RsCard(insideMargin = RowCardMargin) {
-            Column {
-                Row(
-                    Modifier.fillMaxWidth().height(52.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text("动画效果", fontSize = 15.sp, color = c.onBackground, modifier = Modifier.weight(1f))
-                    GlassSwitch(
-                        checked = settings.animations,
-                        onCheckedChange = { settings.animations = it },
-                    )
-                }
-                ThinDivider(indent = false)
-                Row(
-                    Modifier.fillMaxWidth().height(52.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text("触觉反馈", fontSize = 15.sp, color = c.onBackground, modifier = Modifier.weight(1f))
-                    GlassSwitch(
-                        checked = settings.haptics,
-                        onCheckedChange = { settings.haptics = it },
-                    )
-                }
-            }
-        }
-
-        Spacer(Modifier.height(16.dp))
         SmallTitle("隐私与数据")
         RsCard(insideMargin = RowCardMargin) {
             Column {

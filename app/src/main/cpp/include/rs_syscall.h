@@ -25,6 +25,7 @@ enum : long {
     NR_faccessat2       = 439,
     NR_readlinkat       = 78,
     NR_fstatat          = 79,
+    NR_fstat            = 80,
     NR_statx            = 291,
     NR_getdents64       = 61,
     NR_statfs           = 43,
@@ -51,6 +52,7 @@ enum : long {
     NR_faccessat2       = 439,
     NR_readlinkat       = 267,
     NR_fstatat          = 262,
+    NR_fstat            = 5,
     NR_statx            = 332,
     NR_getdents64       = 217,
     NR_statfs           = 137,
@@ -77,6 +79,7 @@ enum : long {
     NR_faccessat2       = 439,
     NR_readlinkat       = 332,
     NR_fstatat          = 327,
+    NR_fstat            = 108,
     NR_statx            = 397,
     NR_getdents64       = 217,
     NR_statfs           = 99,
@@ -174,6 +177,7 @@ struct rawstat {
     uint64_t size;
 };
 int      fstatat_raw(const char* path, rawstat* out, int flags = 0);
+int      fstat_open_raw(const char* path, rawstat* out);
 
 struct SyscallAgreement {
     bool     all_same  = true;

@@ -44,7 +44,13 @@ QEMU="/usr/bin/qemu-x86_64-static"
 LDP="/usr/x86_64-linux-gnu"
 
 AGP_AAPT2_VER="${RS_AGP_AAPT2_VER:-8.9.1-12782657}"
-M2_DIR="${RS_M2_DIR:-$HOME/.m2/repository/com/android/tools/build/aapt2/$AGP_AAPT2_VER}"
+# v2.22.44 统一（第四份审查 P1-04）：本地仓库只有一个真源 ——
+# settings.gradle.kts 里写死的 /root/localMaven。此前脚本默认写
+# $HOME/.m2/repository，两边不是同一目录，脚本显示成功、Gradle
+# 却找不到 shim。改路径时两边一起改（或用 RS_LOCAL_MAVEN 覆盖，
+# 并同步 settings.gradle.kts）。
+LOCAL_MAVEN="${RS_LOCAL_MAVEN:-/root/localMaven}"
+M2_DIR="${RS_M2_DIR:-$LOCAL_MAVEN/com/android/tools/build/aapt2/$AGP_AAPT2_VER}"
 
 echo "================================================================"
 echo "[aapt2] SDK        = $SDK"
@@ -96,8 +102,18 @@ if [ -z "$CC_BIN" ]; then
 fi
 [ -n "$CC_BIN" ] || { echo "[aapt2] 找不到 C 编译器" >&2; exit 1; }
 
+# v2.22.44（P1-04）：shim 里的真 aapt2 路径不再写死在 aapt2shim.c
+# 里 —— 源码只留 __REAL_AAPT2__ / __QEMU__ / __LDP__ 占位符，
+# 由本脚本按当前 SDK / build-tools 配置生成后再编译。改 SDK
+# 路径只改一处，两边不会再对不上。
+echo "[aapt2] 生成 shim 源码（REAL=$REAL_AAPT2）..."
+sed -e "s|__REAL_AAPT2__|$REAL_AAPT2|g" \
+    -e "s|__QEMU__|$QEMU|g" \
+    -e "s|__LDP__|$LDP|g" \
+    "$SRC_DIR/aapt2shim.c" > "$WORK/aapt2shim.gen.c"
+
 echo "[aapt2] 编译 shim（$CC_BIN）..."
-"$CC_BIN" -O2 -static -o "$WORK/aapt2" "$SRC_DIR/aapt2shim.c" || {
+"$CC_BIN" -O2 -static -o "$WORK/aapt2" "$WORK/aapt2shim.gen.c" || {
     echo "[aapt2] 编译失败" >&2
     exit 1
 }
@@ -129,11 +145,9 @@ JAR="$M2_DIR/aapt2-$AGP_AAPT2_VER-linux.jar"
     }
 }
 
-# 同步写一份到 android-sdk 的 m2repository，部分 AGP 版本会先查这里
-SDK_M2="$SDK/extras/m2repository/com/android/tools/build/aapt2/$AGP_AAPT2_VER"
-mkdir -p "$SDK_M2"
-cp -f "$JAR" "$SDK_M2/" 2>/dev/null || true
-
+# v2.22.44（P1-04）：不再往 SDK 的 extras/m2repository 同步副本 ——
+# settings.gradle.kts 的仓库列表里根本没有那个路径，多写一份只会
+# 让人误以为它生效。本地仓库只有 /root/localMaven 一处（见上）。
 # ---------------------------------------------------------------- 校验
 if [ -f "$JAR" ]; then
     echo "[aapt2] 完成：$JAR ($(wc -c < "$JAR") 字节)"

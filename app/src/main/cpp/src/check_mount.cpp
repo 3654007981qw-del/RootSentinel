@@ -144,15 +144,26 @@ void checkMount(ScanReport& r) {
     for (const auto& m : fromMountinfo) {
         if (m.fstype == RSs("overlay")) {
             ++overlays;
-            // /system /vendor /product /apex 被 overlay 覆盖是典型模块手法
-            const bool critical = startsWith(m.point, RSs("/system")) ||
-                                  startsWith(m.point, RSs("/vendor")) ||
-                                  startsWith(m.point, RSs("/product")) ||
-                                  startsWith(m.point, RSs("/apex"));
+            // v2.22.44 分档（第四份审查 P2-05）：旧版把 /product、/apex
+            // 也放进 HIGH 档，但本项自己的 fp_note 就写着 Android 10+
+            // 的 /product、/system_ext 原厂就可能用 overlay 做 RRO ——
+            // 口径自相矛盾。现分三档：/system、/vendor 仍是强信号；
+            // /product、/apex、/system_ext 降为 MEDIUM + heuristic；
+            // 其余 LOW。
+            const bool midTier = startsWith(m.point, RSs("/product")) ||
+                                 startsWith(m.point, RSs("/apex")) ||
+                                 startsWith(m.point, RSs("/system_ext"));
+            const bool critical = !midTier &&
+                (startsWith(m.point, RSs("/system")) ||
+                 startsWith(m.point, RSs("/vendor")));
             Evidence e = makeHit(RSs("C.OVERLAY"), Category::MOUNT,
-                                 critical ? Severity::HIGH : Severity::LOW,
-                                 critical ? Confidence::HIGH : Confidence::MEDIUM,
+                                 critical ? Severity::HIGH
+                                          : (midTier ? Severity::MEDIUM
+                                                     : Severity::LOW),
+                                 critical ? Confidence::HIGH
+                                          : Confidence::MEDIUM,
                                  RSs("存在 overlay 挂载: ") + m.point);
+            e.heuristic = !critical;
             e.addVector(RSs("source"), m.source);
             e.fp_note = RSs("Android 10+ 的 /product、/system_ext 本身可能用 "
                             "overlay 做 RRO，需结合 source 判断");
@@ -170,9 +181,16 @@ void checkMount(ScanReport& r) {
             startsWith(m.point, RSs("/data/local")) ||
             startsWith(m.point, RSs("/data/misc"))) {
             ++dataSub;
+            // v2.22.44（P2-05）：/data/misc 下的厂商正常子挂载（如
+            // wifi）是 fp_note 里承认的已知情形，不再只写说明 ——
+            // 直接降为 LOW + heuristic；/data/adb、/data/local
+            // 维持 MEDIUM。
+            const bool vendorArea = startsWith(m.point, RSs("/data/misc"));
             Evidence e = makeHit(RSs("C.DATA_SUBMOUNT"), Category::MOUNT,
-                                 Severity::MEDIUM, Confidence::MEDIUM,
+                                 vendorArea ? Severity::LOW : Severity::MEDIUM,
+                                 Confidence::MEDIUM,
                                  RSs("/data 下存在子挂载: ") + m.point);
+            e.heuristic = vendorArea;
             e.addVector(RSs("source"), m.source);
             e.fp_note = RSs("部分厂商在 /data/misc 下有正常子挂载（如 wifi）");
             r.add(std::move(e));
@@ -185,7 +203,6 @@ void checkMount(ScanReport& r) {
 
     // ---------------------------------------------------------- statfs 交叉
     // 同一分区的文件应返回相同 f_type；不同则说明被 bind mount 覆盖
-    struct Probe { const char* path; const char* tag; };
     const std::vector<std::pair<std::string, std::string>> probes = {
         {RSs("/system/bin/sh"),   RSs("/system")},
         {RSs("/system/build.prop"), RSs("/system")},
@@ -203,14 +220,19 @@ void checkMount(ScanReport& r) {
     }
 
     // ---------------------------------------------------------- 元数据互验
-    // 同一文件：statx / fstatat_raw / 打开后 fstat 三者 st_dev+st_ino 应一致
+    // 同一文件两个真正独立的视角：按路径 statx vs 打开后对 fd 做
+    // fstat，st_dev+st_ino 应一致。
+    // v2.22.44 修正（P2-04）：旧版第二视角用 fstatat_raw，而它内部
+    // 先调 statx_ —— 正常路径上两个视角同源，「互验」是自己比自己，
+    // 注释里写的第三个视角（open+fstat）也根本不存在。现在第二
+    // 视角换成 sys::fstat_open_raw（openat + NR_fstat）。
     const std::vector<std::string> metaPaths = {
         RSs("/system/build.prop"), RSs("/system/bin/sh"),
         RSs("/vendor/build.prop"),
     };
     for (const auto& p : metaPaths) {
-        sys::rawstat rs1{}, rs2{};
-        if (sys::fstatat_raw(p.c_str(), &rs1, 0) != 0) continue;
+        sys::rawstat rs1{};
+        if (sys::fstat_open_raw(p.c_str(), &rs1) != 0) continue;
 
         sys::statx_buf sx{};
         if (sys::statx_(p.c_str(), &sx, nullptr, 0) != 0) continue;
@@ -222,7 +244,7 @@ void checkMount(ScanReport& r) {
             Evidence e = makeHit(RSs("C.META_MISMATCH"), Category::MOUNT,
                                  Severity::HIGH, Confidence::HIGH,
                                  RSs("元数据视角矛盾: ") + p);
-            e.addVector(RSs("fstatat"), hex64(rs1.dev) + "/" + hex64(rs1.ino));
+            e.addVector(RSs("fstat(fd)"), hex64(rs1.dev) + "/" + hex64(rs1.ino));
             e.addVector(RSs("statx"), hex64(dev2) + "/" + hex64(sx.stx_ino));
             e.detail = RSs("同一路径两个视角给出不同的 dev/ino");
             r.add(std::move(e));

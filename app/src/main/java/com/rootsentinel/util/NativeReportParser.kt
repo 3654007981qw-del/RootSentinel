@@ -78,8 +78,12 @@ object NativeReportParser {
                 )
             }
             var sawUnknownCategory = false
+            var sawBlankId = false
             for (i in 0 until arr.length()) {
                 val o = arr.getJSONObject(i)
+                // v2.22.44（P2-02）：id 缺失/为空是协议错误。空 ID 证据
+                // 进入评分层后会按 ID 互相合并去重，悄悄吞掉证据。
+                if (o.optString("id").isBlank()) { sawBlankId = true; continue }
                 // v2.22.42（P2-04）：未知类别不再默认落 ARTIFACT。
                 // ARTIFACT 属 ROOT 维度 —— native 新增类别或协议
                 // 版本错位时，一条不认识的 HIT 会被当成 Root 证据。
@@ -111,6 +115,7 @@ object NativeReportParser {
             // 但 Java 从未解析它 —— 于是 CROSSCHECK_BONUS 在真实调用路径里
             // 永远不会生效，跨视角矛盾这一最有力的证据被整体丢弃。
             val crosses = mutableListOf<CrossCheck>()
+            var sawInconsistentMissing = false
             root.optJSONArray("crosses")?.let { ca ->
                 for (i in 0 until ca.length()) {
                     val o = ca.optJSONObject(i) ?: continue
@@ -127,11 +132,17 @@ object NativeReportParser {
                             oo.keys().forEach { k -> obs += k to oo.optString(k) }
                         }
                     }
+                    // v2.22.44（P2-02）：consistent 缺失不再默认 true。
+                    // 「没说不一致」不等于「一致」—— 缺字段按不一致 +
+                    // 协议问题处理，宁可少给交叉一致的加成。
+                    val consistentDeclared = o.has("consistent")
+                    if (!consistentDeclared) sawInconsistentMissing = true
                     crosses += CrossCheck(
                         id = o.optString("id"),
                         subject = o.optString("subject"),
                         observations = obs,
-                        consistent = o.optBoolean("consistent", true),
+                        consistent = consistentDeclared &&
+                            o.optBoolean("consistent", false),
                         note = o.optString("note"),
                     )
                 }
@@ -139,7 +150,9 @@ object NativeReportParser {
 
             Parsed(
                 items = items, profile = profile, crosses = crosses,
-                version = version, protocolError = sawUnknownCategory,
+                version = version,
+                protocolError = sawUnknownCategory || sawBlankId ||
+                    sawInconsistentMissing,
             )
         } catch (t: Throwable) {
             Parsed(

@@ -406,10 +406,18 @@ object ScoringModel {
         // 虚增覆盖率。现在只看标题与结论详情。
         val blob = (e.title + " " + e.detail).lowercase()
 
-        // 系统明确不支持
+        // 系统明确不支持。
+        // v2.22.44 收敛（第四份审查 P2-01）：删掉「不存在 / 未提供 /
+        // 没有该 / 缺少」这组裸缺失词 —— 它们分不清「设备没这能力」
+        // 和「数据缺口」：F.KERNEL_EOL「缺少该内核分支的维护周期数据」
+        // （内置表没收录）和 G.ATTEST_CHAIN「缺少 bootState 字段」
+        // （解析没取到）都被误判 NOT_APPLICABLE 移出分母，覆盖损失被
+        // 二次掩盖。现在只认明确的能力表述；数据缺口型 UNKNOWN 落到
+        // 下面的 CONDITIONAL，保守计入分母。结构化原因字段仍是
+        // 后续方向（见 CHANGELOG 的延期项），本步先止住误判。
         val notSupported = listOf(
-            "不支持", "不存在", "未挂载", "not supported", "unsupported",
-            "enoent", "未提供", "没有该", "设备不支持", "缺少",
+            "不支持", "未挂载", "not supported", "unsupported",
+            "enoent", "设备不支持",
         )
         if (notSupported.any { blob.contains(it) }) {
             return Applicability.NOT_APPLICABLE

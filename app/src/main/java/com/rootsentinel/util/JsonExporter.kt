@@ -98,9 +98,22 @@ object JsonExporter {
             return null
         }
 
+        // v2.22.44（P2-09）：检查 update() 结果。此前返回值被丢弃 ——
+        // 更新失败时记录永远停在 IS_PENDING=1（下载目录里看不见），
+        // 调用方却照样拿到非 null 的 File 以为导出成功。现在失败
+        // （返回 0 或抛异常）就删掉占位记录并返回 null，与写入失败
+        // 的处理保持一致。
         values.clear()
         values.put(MediaStore.Downloads.IS_PENDING, 0)
-        resolver.update(uri, values, null, null)
+        val updated = try {
+            resolver.update(uri, values, null, null)
+        } catch (t: Throwable) {
+            0
+        }
+        if (updated <= 0) {
+            runCatching { resolver.delete(uri, null, null) }
+            return null
+        }
 
         // 对外返回约定的真实路径（MediaStore 不直接暴露绝对路径；
         // 多用户/外置卷等非常规布局下该路径可能不精确，导出成功与否

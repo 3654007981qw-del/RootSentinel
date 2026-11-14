@@ -350,9 +350,12 @@ class SafetyNetDetector(private val context: Context) {
 
             val procs = am.runningAppProcesses
             if (procs.isNullOrEmpty()) {
-                return ev("F.AM_PROCS", Severity.INFO, Verdict.PASS,
+                // v2.22.44（P2-03）：拿不到进程列表证明不了进程状态
+                // 正常 —— 与上面 ActivityManager 为 null 的路径对齐，
+                // 记 UNKNOWN，不再 PASS + HIGH。
+                return ev("F.AM_PROCS", Severity.INFO, Verdict.UNKNOWN,
                     "运行进程列表不可用（Android 5+ 正常限制）",
-                    Confidence.HIGH, cat = Category.SELINUX)
+                    Confidence.LOW, cat = Category.SELINUX)
             }
 
             val me = procs.firstOrNull { it.pid == Process.myPid() }
