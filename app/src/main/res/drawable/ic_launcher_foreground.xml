@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 图标前景：盾牌 + 扫描线 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- 外层盾牌轮廓 -->
+    <path
+        android:pathData="M54,17 L79,28 L79,54 C79,69.5 68.5,82 54,89 C39.5,82 29,69.5 29,54 L29,28 Z"
+        android:fillColor="#0E1A14"
+        android:strokeColor="#4ADE80"
+        android:strokeWidth="2.5" />
+
+    <!-- 内层高亮 -->
+    <path
+        android:pathData="M54,24 L73,32.5 L73,54 C73,66 64.5,76 54,82 C43.5,76 35,66 35,54 L35,32.5 Z"
+        android:fillColor="#12241B" />
+
+    <!-- 扫描线（三条，长度递减） -->
+    <path
+        android:pathData="M42,45 L66,45"
+        android:strokeColor="#4ADE80"
+        android:strokeWidth="3"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M42,54 L66,54"
+        android:strokeColor="#4ADE80"
+        android:strokeWidth="3"
+        android:strokeLineCap="round"
+        android:strokeAlpha="0.75" />
+    <path
+        android:pathData="M42,63 L59,63"
+        android:strokeColor="#4ADE80"
+        android:strokeWidth="3"
+        android:strokeLineCap="round"
+        android:strokeAlpha="0.45" />
+
+    <!-- 中心瞄准点 -->
+    <path
+        android:pathData="M54,54 m-2.2,0 a2.2,2.2 0 1,0 4.4,0 a2.2,2.2 0 1,0 -4.4,0"
+        android:fillColor="#E8FFF2" />
+</vector>

@@ -1,0 +1,14 @@
+# 本地环境（路径因机器而异，不入库）
+local.properties
+# 构建产物
+.gradle/
+build/
+app/build/
+app/src/main/cpp/.cxx/
+# IDE
+.idea/
+*.iml
+# 签名材料绝不入库（凭据走环境变量 RS_KS_*）
+*.jks
+*.keystore
+*.kspass
