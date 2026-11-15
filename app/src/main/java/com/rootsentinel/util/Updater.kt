@@ -95,6 +95,21 @@ object Updater {
         }.distinct()
 
     /**
+     * Gitee 命中时的候选列表（纯函数，可单测，v2.22.56）：Gitee
+     * 地址排第一——它能答复检查，就说明这条国内路径此刻是通的；
+     * 其后仍是 GitHub 直连与镜像作补充，下载前的测速排序还会再
+     * 按实测吞吐重排一次。
+     */
+    fun giteeFirstCandidates(githubUrl: String?, giteeUrl: String?): List<String> =
+        buildList {
+            if (giteeUrl != null) add(giteeUrl)
+            if (githubUrl != null) {
+                add(githubUrl)
+                addAll(mirrorUrls(githubUrl))
+            }
+        }.distinct()
+
+    /**
      * 分片计划（纯函数，可单测）：把 [0, total) 切成至多 chunks 段
      * 连续不重叠的闭区间。total <= 0 返回空表。
      */
@@ -206,23 +221,79 @@ object Updater {
         else -> CheckResult.Failed
     }
 
-    /** 查新版：GitHub 优先，找到就不问 Gitee。阻塞调用，走 IO 线程。 */
+    /**
+     * 查新版：GitHub 与 Gitee 并行竞速（v2.22.56），先答先用。
+     * 阻塞调用，走 IO 线程。
+     *
+     * 旧版串行先问 GitHub：国内不挂梯子时 GitHub 经常黑洞式挂起
+     * （连接不报错也不返回），用户要干等它超时完才轮到 Gitee，
+     * 甚至直接失败——这是「国内无法更新」的检查侧主因。现在两源
+     * 同时问：任一 Found 立即采用；Gitee 先答复且 GitHub 2.5 秒
+     * 内没跟上就直接按 Gitee 下结论，不再陪等。GitHub 命中时仍
+     * 顺手（尽力而为，短超时）取一次 Gitee 同版本资产地址追加为
+     * 下载候选。decide() 的三态语义不变。
+     */
     fun check(): CheckResult {
-        val gh = checkFrom(GITHUB_LATEST, "GitHub")
-        if (gh is SourceOutcome.Found) {
-            // v2.22.52：GitHub 命中后顺手（尽力而为，短超时）取一次
-            // Gitee 同版本资产地址，追加为下载候选的最后一环。
-            // 取不到不影响结论，decide() 的三态语义不变。
-            val gtUrl = giteeAssetUrl(gh.info.versionName)
-            val info = if (gtUrl != null) {
-                gh.info.copy(candidates = candidates(gh.info.apkUrl, gtUrl))
-            } else {
-                gh.info
+        val pool = Executors.newFixedThreadPool(2)
+        try {
+            val ecs = java.util.concurrent.ExecutorCompletionService<
+                Pair<String, SourceOutcome>,
+                >(pool)
+            ecs.submit {
+                "GitHub" to try {
+                    checkFrom(GITHUB_LATEST, "GitHub")
+                } catch (t: Throwable) {
+                    SourceOutcome.Failed
+                }
             }
-            return CheckResult.Found(info)
+            ecs.submit {
+                "Gitee" to try {
+                    checkFrom(GITEE_LATEST, "Gitee")
+                } catch (t: Throwable) {
+                    SourceOutcome.Failed
+                }
+            }
+            var gh: SourceOutcome? = null
+            var gt: SourceOutcome? = null
+            var gtDoneAt = 0L
+            val deadline = System.currentTimeMillis() + 20_000
+            while (System.currentTimeMillis() < deadline) {
+                if (gh is SourceOutcome.Found || gt is SourceOutcome.Found) break
+                if (gh != null && gt != null) break
+                if (gt != null && gh == null &&
+                    System.currentTimeMillis() - gtDoneAt > 2_500
+                ) {
+                    break
+                }
+                val done = ecs.poll(200, java.util.concurrent.TimeUnit.MILLISECONDS)
+                    ?: continue
+                // 任务本身已在提交处兜底捕获，这里再兜一层：取结果
+                // 失败就当这个源没答复，继续等另一个或等到截止。
+                val (src, outcome) = runCatching { done.get() }.getOrNull()
+                    ?: continue
+                if (src == "GitHub") {
+                    gh = outcome
+                } else {
+                    gt = outcome
+                    if (gtDoneAt == 0L) gtDoneAt = System.currentTimeMillis()
+                }
+            }
+            val ghInfo = (gh as? SourceOutcome.Found)?.info
+            if (ghInfo != null) {
+                val gtUrl = giteeAssetUrl(ghInfo.versionName)
+                val info = if (gtUrl != null) {
+                    ghInfo.copy(candidates = candidates(ghInfo.apkUrl, gtUrl))
+                } else {
+                    ghInfo
+                }
+                return CheckResult.Found(info)
+            }
+            val gtInfo = (gt as? SourceOutcome.Found)?.info
+            if (gtInfo != null) return CheckResult.Found(gtInfo)
+            return decide(gh ?: SourceOutcome.Failed, gt ?: SourceOutcome.Failed)
+        } finally {
+            pool.shutdownNow()
         }
-        val gt = checkFrom(GITEE_LATEST, "Gitee")
-        return decide(gh, gt)
     }
 
     /** Gitee 上指定版本（tag，不带 v）的 release APK 地址；任何异常返回 null。 */
@@ -278,19 +349,24 @@ object Updater {
             // v2.22.52：候选列表在结论产生处就建好。GitHub 源直接
             // 派生镜像候选（Gitee 地址由 check() 命中后补取）；
             // Gitee 源则按本仓库固定的发布地址规律反推 GitHub
-            // 直链（/releases/download/v<tag>/<资产名>），使候选
-            // 顺序与 GitHub 命中时一致。
-            val cands = if (source == "GitHub") {
-                candidates(url, null)
+            // 直链（/releases/download/v<tag>/<资产名>）。
+            // v2.22.56：Gitee 命中时把 Gitee 地址排到候选第一位
+            // （这条国内路径此刻是通的）；展示/复制用的官方地址
+            // apkUrl 仍恒为 GitHub 直链，不随候选顺序变化。
+            val official: String
+            val cands: List<String>
+            if (source == "GitHub") {
+                official = url
+                cands = candidates(url, null)
             } else {
-                val canonical = "$REPO_URL/releases/download/v$tag/${a.optString("name")}"
-                candidates(canonical, url)
+                official = "$REPO_URL/releases/download/v$tag/${a.optString("name")}"
+                cands = giteeFirstCandidates(official, url)
             }
             return SourceOutcome.Found(
                 UpdateInfo(
                     versionName = tag,
                     notes = json.optString("body"),
-                    apkUrl = cands.first(),
+                    apkUrl = official,
                     apkSize = a.optLong("size"),
                     sha256 = a.optString("digest").removePrefix("sha256:")
                         .ifEmpty { null },

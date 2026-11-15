@@ -196,6 +196,19 @@ class UpdaterTest {
     }
 
     @Test
+    fun giteeFirstCandidatesOrder() {
+        val gh = "https://github.com/AURORA-0711/RootSentinel/releases/download/v1/x.apk"
+        val gt = "https://gitee.com/AURORAqw/RootSentinel/releases/download/v1/x.apk"
+        val c = Updater.giteeFirstCandidates(gh, gt)
+        // Gitee 第一，其后是 GitHub 直连 + 3 镜像，共 5 个
+        assertEquals(gt, c.first())
+        assertEquals(gh, c[1])
+        assertEquals(5, c.size)
+        assertEquals(listOf(gt), Updater.giteeFirstCandidates(null, gt))
+        assertEquals(4, Updater.giteeFirstCandidates(gh, null).size)
+    }
+
+    @Test
     fun formatSpeedUnits() {
         assertEquals("—", Updater.formatSpeed(0))
         assertEquals("512 B/s", Updater.formatSpeed(512))
