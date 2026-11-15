@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.22.60 — 2026-11-15
+
+界面按用户要求改为**直接照抄 KernelSU 管理器（tiann/KernelSU）的 UI 代码**，不再是仿写：主题系统、浮动液态玻璃底栏、页面骨架、设置页、调色板页、对话框框架、Markdown 渲染等均逐文件移植自 KernelSU 源码（保留其原包名 me.weishu.kernelsu）。随之整套依赖栈对齐 KernelSU：Kotlin 2.4.20、Compose BOM 2026.09.00（Compose 1.12.1）、material3 1.5.0-alpha28、miuix 0.9.4、material-kolor 5.0.1、okhttp 5.5.0、commonmark 0.30.0。检测引擎、评分、遥测、更新逻辑未动；单测 42/42。
+
+- **底栏液态玻璃**：KernelSU 的 FloatingBottomBar（Backdrop 模糊 + lens 折射 + 内阴影）原样启用，设置里可开关浮动底栏与其模糊（默认开，按用户要求）。
+- **照抄范围**：Theme/MiuixTheme/MaterialTheme、Colors、FloatingBottomBar + liquid 组件、BottomBar/SideRail、WarningCard、Dialog 框架、SegmentedList、调色板页、设置页（含外观/玻璃/手势等全部条目）、页面手势与动画工具。
+- **接缝（仅数据源不同，界面代码不动）**：首页/报告/历史/扫描/详情/设备/关于页沿用 KernelSU 的 Scaffold/卡片骨架，内容换成 RootSentinel 的扫描结果与设备信息；设置页末尾追加 RootSentinel 自己的隐私卡（上传诊断摘要/自动导出/保留历史）。KernelSU 的内核专属功能（超级用户、模块、su 设置等）在 RootSentinel 无对应能力，入口按 KernelSU 自己的 KsuIsValid 机制不显示，不做假开关。
+- **设置项全部真实生效**：主题模式（7 档 ColorMode）、键色/取色风格、页面缩放、预测性返回、滑动关闭、Pager 手势拦截、导航徽标、模块描述行数等均接 RootSentinel 的设置存储。
+- **扫描进度如实显示**：引擎没有固定模块总数，进度只显示当前模块名 + 已检项数，不编造百分比。
+- Release APK 10,089,827 B（dex 9.3 MB；体积增长来自完整的 KernelSU 界面栈）。
+
 ## 2.22.59 — 2026-11-15
 
 界面按 KernelSU 管理器（tiann/KernelSU）全面重构：风格与页面逻辑照它，检测引擎、评分、遥测、更新逻辑未动。

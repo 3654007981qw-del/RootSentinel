@@ -32,7 +32,6 @@
 -keep class top.yukonga.miuix.** { *; }
 
 # ---- backdrop 内嵌库 ----
--keep class com.kyant.backdrop.** { *; }
 
 # ---- 协程 ----
 -dontwarn kotlinx.coroutines.**

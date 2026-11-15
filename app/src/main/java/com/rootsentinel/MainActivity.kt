@@ -1,36 +1,30 @@
 package com.rootsentinel
 
-import android.app.Activity
+import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.PredictiveBackHandler
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.background
-import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.List
-import androidx.compose.material.icons.filled.DateRange
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
-import androidx.compose.material3.lightColorScheme
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerDefaults
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -44,65 +38,102 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.PlatformTextStyle
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.em
+import androidx.navigationevent.NavigationEventInfo
+import androidx.navigationevent.compose.NavigationBackHandler
+import androidx.navigationevent.compose.rememberNavigationEventState
+import com.materialkolor.PaletteStyle
+import com.materialkolor.dynamiccolor.ColorSpec
 import com.rootsentinel.data.HistoryEntry
 import com.rootsentinel.data.HistoryStore
+import com.rootsentinel.data.LatestReportProvider
 import com.rootsentinel.data.SettingsStore
 import com.rootsentinel.engine.DetectorEngine
 import com.rootsentinel.model.Evidence
-import kotlinx.coroutines.CancellationException
+import com.rootsentinel.model.Grade
+import com.rootsentinel.model.Verdict
+import com.rootsentinel.util.JsonExporter
+import com.rootsentinel.util.Telemetry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import me.weishu.kernelsu.data.repository.SettingsRepositoryImpl
+import me.weishu.kernelsu.ksuApp
+import me.weishu.kernelsu.ui.UiMode
+import me.weishu.kernelsu.ui.component.bottombar.BottomBar
+import me.weishu.kernelsu.ui.component.bottombar.MainPagerState
+import me.weishu.kernelsu.ui.component.bottombar.NavigationBadgeState
+import me.weishu.kernelsu.ui.component.bottombar.SideRail
+import me.weishu.kernelsu.ui.component.bottombar.rememberMainPagerState
+import me.weishu.kernelsu.ui.component.bottombar.useNavigationRail
+import me.weishu.kernelsu.ui.screen.colorpalette.ColorPaletteScreenActions
+import me.weishu.kernelsu.ui.screen.colorpalette.ColorPaletteScreenMaterial
+import me.weishu.kernelsu.ui.screen.colorpalette.ColorPaletteScreenMiuix
+import me.weishu.kernelsu.ui.screen.colorpalette.ColorPaletteUiState
+import me.weishu.kernelsu.ui.screen.home.HomeActions
+import me.weishu.kernelsu.ui.screen.home.HomePagerMaterial
+import me.weishu.kernelsu.ui.screen.home.HomePagerMiuix
+import me.weishu.kernelsu.ui.screen.home.HomeUiState
+import me.weishu.kernelsu.ui.screen.home.SystemInfo
+import me.weishu.kernelsu.ui.screen.settings.RsPrivacyState
+import me.weishu.kernelsu.ui.screen.settings.RsSettingsActions
+import me.weishu.kernelsu.ui.screen.settings.SettingPagerMaterial
+import me.weishu.kernelsu.ui.screen.settings.SettingPagerMiuix
+import me.weishu.kernelsu.ui.screen.settings.SettingsScreenActions
+import me.weishu.kernelsu.ui.screen.settings.SettingsUiState
+import me.weishu.kernelsu.ui.theme.KernelSUTheme
+import me.weishu.kernelsu.ui.theme.LocalColorMode
+import me.weishu.kernelsu.ui.theme.LocalEnableBlur
+import me.weishu.kernelsu.ui.theme.LocalEnableFloatingBottomBar
+import me.weishu.kernelsu.ui.theme.LocalEnableFloatingBottomBarBlur
+import me.weishu.kernelsu.ui.theme.LocalEnableNavigationBadge
+import me.weishu.kernelsu.ui.theme.LocalModuleDescriptionMaxLines
+import me.weishu.kernelsu.ui.LocalUiMode
+import me.weishu.kernelsu.ui.theme.ThemeController
+import me.weishu.kernelsu.ui.util.rememberBlurBackdrop
+import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.blur.layerBackdrop
+import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import top.yukonga.miuix.kmp.theme.MiuixTheme
-import top.yukonga.miuix.kmp.theme.TextStyles
+import top.yukonga.miuix.kmp.utils.PagerGestureNestedScrollConnection
+import top.yukonga.miuix.kmp.utils.PagerInterceptionMode
+import top.yukonga.miuix.kmp.utils.PagerNavigationSpringSpec
+import top.yukonga.miuix.kmp.utils.pagerGestureOverride
 
 /**
- * 入口（v2.22.59 起界面按 KernelSU 管理器重构）：
- * 双模式（Miuix 默认 / Material）+ 状态卡首页 + 分组卡片列表 +
- * 主标签浮动底栏。检测引擎、评分、遥测与更新逻辑一概未动。
+ * RootSentinel 主入口（v2.22.60）。
+ *
+ * 界面骨架照 KernelSU 的 MainActivity / MainScreen 组织：主题系统、本地
+ *  CompositionLocal、HorizontalPager 四页、FloatingBottomBar 液态玻璃
+ * 底栏与导航栏（SideRail）全部用 KSU 原样组件；RootSentinel 只提供
+ * 数据接缝：扫描状态、报告/历史、设置存储与更新控制器。
  */
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
-        // 窗口背景必须是实色：否则系统栏 / 窗口边缘会透出桌面
-        // （v2.5.3 的截图里顶部漏出了桌面 dock，就是这个原因）
-        val night = (resources.configuration.uiMode and
-            android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
-            android.content.res.Configuration.UI_MODE_NIGHT_YES
-        window.setBackgroundDrawable(
-            android.graphics.drawable.ColorDrawable(
-                if (night) 0xFF000000.toInt() else 0xFFFFFFFF.toInt(),
-            ),
-        )
         super.onCreate(savedInstanceState)
-        setContent { RootApp() }
+        ksuApp = application
+        enableEdgeToEdge()
+        val auto = intent?.getStringExtra("auto")
+        val tab = intent?.getIntExtra("tab", 0) ?: 0
+        val sub = intent?.getStringExtra("sub")
+        setContent {
+            RootApp(auto = auto, initialTab = tab, initialSub = sub)
+        }
     }
-}
-
-/** 页面 */
-enum class Page(val label: String) {
-    HOME("首页"),
-    SCAN("扫描"),
-    REPORT("报告"),
-    HISTORY("历史"),
-    SETTINGS("设置"),
-    DETAIL("详情"),
-    DEVICE("设备"),
-    ABOUT("关于"),
 }
 
 /** 扫描期间的实时状态（Compose snapshot state，可从后台线程写入） */
 class ScanState {
     var scanning by mutableStateOf(false)
-    /** v2.22.43：真实取消信号。之前 onCancel 直接把 scanning 置 false，
-     *  引擎的取消检查点从未被接通（isCancelled 没人传），扫描在后台
-     *  继续跑，而 UI 却允许立刻开新一轮。现在取消只置这个标志，
-     *  scanning 保持 true 直到引擎真正返回，避免两轮扫描并发。 */
+    /** 真实取消信号：取消只置此标志，scanning 保持 true 直到引擎真正
+     *  返回，避免两轮扫描并发（v2.22.43 起的行为，保持不变） */
     var cancelRequested by mutableStateOf(false)
     var moduleName by mutableStateOf("准备中…")
     var moduleIdx by mutableIntStateOf(0)
@@ -116,50 +147,53 @@ class ScanState {
 
 data class LiveItem(val id: String, val title: String, val severity: String)
 
-/**
- * Miuix 的默认文本样式只设了 fontSize，没有 lineHeight；
- * 而 Compose 默认 `includeFontPadding = false` ——
- * 中文字形的底横正好会被裁掉，表现就是「检测项」这类小字下缘被切平（v2.5.5 截图）。
- *
- * 这里统一修：
- *   · platformStyle.includeFontPadding = true  → 恢复字形上下留白
- *   · lineHeight = 1.35em                      → 相对字号，随 fontSize 自动缩放
- */
-@Composable
-private fun rsTextStyles(): TextStyles {
-    val base = MiuixTheme.textStyles
-    return remember(base) {
-        val fixed = PlatformTextStyle(includeFontPadding = true)
-        base.copy(
-            main = base.main.copy(platformStyle = fixed, lineHeight = 1.35.em),
-            body1 = base.body1.copy(platformStyle = fixed, lineHeight = 1.35.em),
-            body2 = base.body2.copy(platformStyle = fixed, lineHeight = 1.35.em),
-            footnote1 = base.footnote1.copy(platformStyle = fixed, lineHeight = 1.35.em),
-            footnote2 = base.footnote2.copy(platformStyle = fixed, lineHeight = 1.35.em),
-            subtitle = base.subtitle.copy(platformStyle = fixed, lineHeight = 1.35.em),
-            button = base.button.copy(platformStyle = fixed, lineHeight = 1.35.em),
-        )
-    }
-}
+private enum class SubPage { NONE, SCAN, DETAIL, DEVICE, ABOUT, THEME }
 
 @Composable
-fun RootApp() {
+fun RootApp(auto: String?, initialTab: Int, initialSub: String?) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
-    val settings = remember { SettingsStore(ctx) }
+    val settings = remember {
+        SettingsStore(ctx).also { SettingsRepositoryImpl.store = it }
+    }
     val history = remember { HistoryStore(ctx) }
     val engine = remember { DetectorEngine(ctx) }
     val scan = remember { ScanState() }
-    // 应用内更新（v2.22.47）：声明确认后每次启动自动查一次新版，
-    // 查到才弹窗；设置页有手动入口。检查走 GitHub/Gitee 发布接口。
     val updateController = remember { UpdateController() }
-    LaunchedEffect(settings.declarationSeen) {
-        if (settings.declarationSeen) updateController.checkAuto(scope)
-    }
 
-    var page by remember { mutableStateOf(Page.HOME) }
     var result by remember { mutableStateOf<DetectorEngine.Result?>(null) }
     var detail by remember { mutableStateOf<Evidence?>(null) }
+    var subPage by remember {
+        mutableStateOf(
+            when (initialSub) {
+                "device" -> SubPage.DEVICE
+                "about" -> SubPage.ABOUT
+                "theme" -> SubPage.THEME
+                else -> SubPage.NONE
+            },
+        )
+    }
+
+    val pagerState = rememberPagerState(
+        initialPage = initialTab.coerceIn(0, 3),
+        pageCount = { 4 },
+    )
+    val useRail = useNavigationRail(settings.enableFloatingBottomBar)
+    val mainPagerState = rememberMainPagerState(
+        pagerState = pagerState,
+        animatePageChanges = !useRail,
+    )
+
+    fun openUrl(url: String) {
+        runCatching {
+            ctx.startActivity(
+                Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        }.onFailure {
+            Toast.makeText(ctx, "打开链接失败", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     fun startScan() {
         if (scan.scanning) return
@@ -173,7 +207,7 @@ fun RootApp() {
         scan.moduleName = "准备中…"
         scan.startedAt = System.currentTimeMillis()
         scan.live.clear()
-        page = Page.SCAN
+        subPage = SubPage.SCAN
 
         scope.launch(Dispatchers.Default) {
             val r = try {
@@ -199,7 +233,6 @@ fun RootApp() {
             withContext(Dispatchers.Main) {
                 scan.scanning = false
                 if (r != null) {
-                    // 结果摘要只进 logcat（不落盘、不含设备标识），供自动化回归判断
                     android.util.Log.i(
                         "RootSentinel",
                         "grade=${r.score.grade}" +
@@ -213,380 +246,488 @@ fun RootApp() {
                             " items=${r.items.size} elapsed=${r.elapsedMs}ms",
                     )
                     result = r
-                    // 用 runCatching 包住：写历史失败（存储满等）不能影响结果展示
                     if (settings.keepHistory) {
-                        val ok = runCatching { history.append(HistoryEntry.from(r)) }.isSuccess
-                        android.util.Log.i(
-                            "RootSentinel",
-                            "history append ok=$ok keepHistory=true total=${history.entries.size}",
-                        )
-                    } else {
-                        android.util.Log.w(
-                            "RootSentinel",
-                            "history skipped: keepHistory=false",
-                        )
+                        runCatching { history.append(HistoryEntry.from(r)) }
                     }
-
-                    // ---------------------------------------------------------- 自动导出
-                    // settings.autoExport 之前**只有设置页在写、没有任何地方读** ——
-                    // 开关存在但功能根本没实现，用户打开它什么也不会发生。
-                    // 这里补上：扫描完成后按开关决定是否落盘 JSON。
-                    // ---------------------------------------------------------- 诊断摘要上传
-                    // v2.22.46：声明已确认 + 开关开启才传。未确认声明时
-                    // 一律不传（顺序见 SettingsStore.declarationSeen）。
-                    // 接收端未配置时 Telemetry.upload 内部直接返回。
+                    // 诊断摘要上传：声明已确认 + 开关开启才传（v2.22.46 起的约定）
                     if (settings.declarationSeen && settings.telemetryEnabled) {
-                        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                            com.rootsentinel.util.Telemetry.upload(r)
-                        }
+                        scope.launch(Dispatchers.IO) { Telemetry.upload(r) }
                     }
-
                     if (settings.autoExport) {
-                        // v2.22.44（P2-08）：导出移出主线程。此前这段在
-                        // withContext(Main) 块里同步跑，JSON 构建 + 写盘
-                        // 都压在主线程上，大报告会卡界面。改走 IO 协程，
-                        // 结果只落一行日志（导出是副作用，不阻塞出报告）。
-                        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                            val f = runCatching {
-                                com.rootsentinel.util.JsonExporter.export(ctx, r)
-                            }.getOrNull()
-                            android.util.Log.i(
-                                "RootSentinel",
-                                "autoExport path=${f?.absolutePath ?: "null"}",
-                            )
+                        scope.launch(Dispatchers.IO) {
+                            runCatching { JsonExporter.export(ctx, r) }
                         }
                     }
-
-                    page = Page.REPORT
+                    subPage = SubPage.NONE
+                    mainPagerState.animateToPage(1)
                 } else {
                     scan.failed = true
+                    subPage = SubPage.NONE
                 }
             }
         }
     }
 
-    // 调试/自动化：`am start ... --ez autoscan true` 时启动即扫描
-    // v2.22.44（P2-06）：autoscan / navtest / snap 三个调试入口全部
-    // 加 BuildConfig.DEBUG 门槛。此前 release 构建同样生效 —— 启动器
-    // Activity 是 exported 的，任何应用都能用这些 extra 拉起扫描，
-    // 叠加自动导出开关还能顺带落盘报告。现在 release 里恒不触发。
-    val activity = ctx as? Activity
-    LaunchedEffect(Unit) {
-        if (BuildConfig.DEBUG &&
-            activity?.intent?.getBooleanExtra("autoscan", false) == true) {
-            startScan()
+    // 启动自动检查更新：声明已确认且设置开启时才查（查到新版才弹窗）
+    LaunchedEffect(settings.declarationSeen, settings.checkUpdate) {
+        if (settings.declarationSeen && settings.checkUpdate) {
+            updateController.checkAuto(scope)
         }
     }
-
-    // 调试/自动化：`am start ... --ez navtest true` 时自动走一遍所有 tab。
+    // DEBUG 自动化入口：auto=scan 直接开扫
     LaunchedEffect(Unit) {
-        if (BuildConfig.DEBUG &&
-            activity?.intent?.getBooleanExtra("navtest", false) == true) {
-            val seq = listOf(
-                Page.SCAN, Page.REPORT, Page.HISTORY,
-                Page.SETTINGS, Page.DEVICE, Page.HOME,
-            )
-            seq.forEachIndexed { i, p ->
-                kotlinx.coroutines.delay(2500)
-                android.util.Log.i("RootSentinel", "navtest[$i]=$p")
-                page = p
-            }
+        if (auto == "scan" && settings.declarationSeen) startScan()
+    }
+    // 发送日志/导出报告的数据源
+    LaunchedEffect(result) {
+        val snapshot = result
+        LatestReportProvider.latestReportJson = {
+            snapshot?.let { r -> runCatching { JsonExporter.toJsonString(r) }.getOrNull() }
         }
     }
-
-    // 调试/自动化：`am start ... --ez snap true` 时把界面画成 PNG 存到应用外部目录。
-    val rootView = androidx.compose.ui.platform.LocalView.current
-    LaunchedEffect(Unit) {
-        if (BuildConfig.DEBUG &&
-            activity?.intent?.getBooleanExtra("snap", false) == true) {
-            kotlinx.coroutines.delay(3000)
-            try {
-                val w = rootView.width
-                val h = rootView.height
-                if (w > 0 && h > 0) {
-                    val bmp = android.graphics.Bitmap.createBitmap(
-                        w, h, android.graphics.Bitmap.Config.ARGB_8888,
-                    )
-                    rootView.draw(android.graphics.Canvas(bmp))
-                    val dir = ctx.getExternalFilesDir(null)
-                    val f = java.io.File(dir, "snap.png")
-                    java.io.FileOutputStream(f).use {
-                        bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
-                    }
-                    android.util.Log.i("RootSentinel", "snap=${f.absolutePath} ${w}x${h}")
-                } else {
-                    android.util.Log.w("RootSentinel", "snap skipped: view size ${w}x$h")
-                }
-            } catch (t: Throwable) {
-                android.util.Log.w("RootSentinel", "snap failed: $t")
-            }
-        }
-    }
-
-    // ================= 界面模式与主题（KernelSU 式双模式） =================
-    val uiMode = UiMode.fromValue(settings.uiMode)
-    val sysDark = isSystemInDarkTheme()
-    val dark = when (settings.colorMode) {
-        1 -> false
-        2 -> true
-        else -> sysDark
-    }
-    val rsColors = if (dark) top.yukonga.miuix.kmp.theme.darkColorScheme()
-    else top.yukonga.miuix.kmp.theme.lightColorScheme()
-    val matColors = when {
-        dark && Build.VERSION.SDK_INT >= 31 -> dynamicDarkColorScheme(ctx)
-        !dark && Build.VERSION.SDK_INT >= 31 -> dynamicLightColorScheme(ctx)
-        dark -> darkColorScheme()
-        else -> lightColorScheme()
-    }
-    val palette = if (uiMode == UiMode.Miuix) {
-        RsPalette(
-            background = rsColors.background,
-            card = rsColors.surface,
-            onBackground = rsColors.onBackground,
-            onVariant = rsColors.onBackgroundVariant,
-            primary = rsColors.primary,
-            divider = rsColors.onBackground.copy(alpha = 0.08f),
-        )
-    } else {
-        RsPalette(
-            background = matColors.background,
-            card = matColors.surfaceContainer,
-            onBackground = matColors.onBackground,
-            onVariant = matColors.onSurfaceVariant,
-            primary = matColors.primary,
-            divider = matColors.outlineVariant,
+    LaunchedEffect(pagerState.settledPage, subPage) {
+        android.util.Log.i(
+            "RootSentinel",
+            "nav=page${pagerState.settledPage} sub=${subPage.name.lowercase()}",
         )
     }
 
-    val mainTabs = listOf(Page.HOME, Page.REPORT, Page.HISTORY, Page.SETTINGS)
-    val isMain = page in mainTabs
-    val backTarget: Page? = when (page) {
-        Page.DETAIL -> Page.REPORT
-        Page.DEVICE, Page.ABOUT -> Page.SETTINGS
-        else -> null
-    }
-    val tabs = listOf(
-        RsTab(Page.HOME, "首页", Icons.Filled.Home),
-        RsTab(Page.REPORT, "报告", Icons.Filled.List),
-        RsTab(Page.HISTORY, "历史", Icons.Filled.DateRange),
-        RsTab(Page.SETTINGS, "设置", Icons.Filled.Settings),
+    // ------------------------------------------------------------ 状态组装
+    val uiMode = UiMode.entries.firstOrNull { it.value == settings.uiMode } ?: UiMode.Miuix
+    val appSettings = ThemeController.getAppSettings()
+    val settingsUiState = SettingsUiState(
+        uiMode = settings.uiMode,
+        checkUpdate = settings.checkUpdate,
+        checkModuleUpdate = settings.checkModuleUpdate,
+        themeMode = settings.themeMode,
+        miuixMonet = settings.miuixMonet,
+        keyColor = settings.keyColor,
+        colorStyle = settings.colorStyle,
+        colorSpec = settings.colorSpec,
+        enablePredictiveBack = settings.enablePredictiveBack,
+        enableSwipeDismiss = settings.enableSwipeDismiss,
+        pagerInterceptionMode = settings.pagerInterceptionMode,
+        enableBlur = settings.enableBlur,
+        enableFloatingBottomBar = settings.enableFloatingBottomBar,
+        enableFloatingBottomBarBlur = settings.enableFloatingBottomBarBlur,
+        enableNavigationBadge = settings.enableNavigationBadge,
+        pageScale = settings.pageScale,
+        moduleDescriptionMaxLines = settings.moduleDescriptionMaxLines,
     )
-    val title = when (page) {
-        Page.HOME -> "RootSentinel"
-        Page.SCAN -> "扫描"
-        Page.REPORT -> "报告"
-        Page.DETAIL -> "详情"
-        Page.HISTORY -> "历史"
-        Page.SETTINGS -> "设置"
-        Page.DEVICE -> "设备信息"
-        Page.ABOUT -> "关于"
+
+    val uname = remember { runCatching { android.system.Os.uname() }.getOrNull() }
+    val selinuxStatus = remember {
+        runCatching { java.io.File("/sys/fs/selinux/enforce").readText().trim() }
+            .getOrNull()
+            ?.let { if (it == "1") "Enforcing" else if (it == "0") "Permissive" else "Unknown" }
+            ?: "Unknown"
     }
+    val homeState = HomeUiState(
+        checkUpdateEnabled = settings.checkUpdate,
+        hasUpdate = updateController.phase == UpdateController.Phase.Available && updateController.info != null,
+        latestVersionName = updateController.info?.versionName ?: "",
+        showIncompleteWarning = result?.score?.grade == Grade.INCOMPLETE,
+        showHidingWarning = result?.score?.grade == Grade.ROOTED_HIDING,
+        hasResult = result != null,
+        scanning = scan.scanning,
+        scanModuleName = scan.moduleName,
+        scanPercent = scan.total,
+        gradeWord = result?.let { gradeWord(it.score.grade) } ?: "",
+        gradeSummary = result?.let {
+            "Root ${it.score.rootScore.toInt()} · 完整性 ${it.score.integrityScore.toInt()} · " +
+                "Hook ${it.score.hookScore.toInt()} · 环境 ${it.score.environmentScore.toInt()} · " +
+                "覆盖 ${(it.score.coverage * 100).toInt()}% · ${it.score.hitCount} 命中 / ${it.score.unknownCount} 未知"
+        } ?: "",
+        gradeKind = result?.let { gradeKindOf(it.score.grade) } ?: 0,
+        systemInfo = SystemInfo(
+            appVersion = "v${RootSentinelVersion.NAME} (${RootSentinelVersion.CODE})",
+            kernelVersion = uname?.release ?: "—",
+            deviceModel = "${Build.MANUFACTURER} ${Build.MODEL}",
+            fingerprint = Build.FINGERPRINT,
+            selinuxStatus = selinuxStatus,
+        ),
+    )
+    val homeActions = HomeActions(
+        onScanClick = { if (!scan.scanning) startScan() },
+        onReportClick = { mainPagerState.animateToPage(1) },
+        onUpdateClick = {
+            updateController.dialogVisible = true
+            if (updateController.phase != UpdateController.Phase.Available) {
+                updateController.checkManual(scope)
+            }
+        },
+        onOpenUrl = { openUrl(it) },
+        onDeviceClick = { subPage = SubPage.DEVICE },
+    )
 
-    // 预测性返回：子页左滑返回上一层
-    PredictiveBackHandler(enabled = backTarget != null) { progress ->
-        try {
-            progress.collect { }
-            backTarget?.let { page = it }
-        } catch (e: CancellationException) {
-            // 用户取消手势：留在当前页
-        }
-    }
-
-    MiuixTheme(rsColors, rsTextStyles(), dark) {
-        CompositionLocalProvider(
-            LocalUiMode provides uiMode,
-            LocalRsPalette provides palette,
-            LocalBottomPad provides if (uiMode == UiMode.Miuix && isMain) 104.dp else 20.dp,
-        ) {
-            val themed: @Composable () -> Unit = {
-                val content: @Composable (PaddingValues) -> Unit = { padding ->
-                    Box(
-                        Modifier
-                            .fillMaxSize()
-                            .background(palette.background)
-                            .padding(padding),
-                    ) {
-                        AnimatedContent(
-                            targetState = page,
-                            transitionSpec = {
-                                val fwd = pageRank(targetState) >= pageRank(initialState)
-                                val spec = spring<IntOffset>(dampingRatio = 0.88f, stiffness = 640f)
-                                (
-                                    slideInHorizontally(spec) { w -> if (fwd) w else -w } +
-                                        fadeIn(tween(90)) +
-                                        scaleIn(
-                                            initialScale = 0.97f,
-                                            animationSpec = spring(dampingRatio = 0.9f, stiffness = 500f),
-                                        )
-                                    ).togetherWith(
-                                    slideOutHorizontally(spec) { w -> if (fwd) -w / 3 else w / 3 } +
-                                        fadeOut(tween(120)) +
-                                        scaleOut(
-                                            targetScale = 1.02f,
-                                            animationSpec = spring(dampingRatio = 0.9f, stiffness = 500f),
-                                        ),
-                                )
-                            },
-                            label = "pageSlide",
-                            modifier = Modifier.fillMaxSize(),
-                        ) { current ->
-                            when (current) {
-                                Page.HOME -> HomePage(
-                                    result = result,
-                                    scanning = scan.scanning,
-                                    updateVersion = if (
-                                        updateController.phase == UpdateController.Phase.Available
-                                    ) {
-                                        updateController.info?.versionName
-                                    } else {
-                                        null
-                                    },
-                                    onScan = { startScan() },
-                                    onDevice = { page = Page.DEVICE },
-                                    onUpdateClick = { updateController.dialogVisible = true },
-                                )
-
-                                Page.SCAN -> ScanPage(
-                                    scan = scan,
-                                    onRescan = { startScan() },
-                                    onCancel = { scan.cancelRequested = true },
-                                )
-
-                                Page.REPORT -> ReportPage(
-                                    result = result,
-                                    onRescan = { startScan() },
-                                    onDetail = {
-                                        detail = it
-                                        page = Page.DETAIL
-                                    },
-                                )
-
-                                Page.DETAIL -> DetailPage(
-                                    item = detail,
-                                    onBack = { page = Page.REPORT },
-                                )
-
-                                Page.HISTORY -> HistoryPage(
-                                    history = history,
-                                    onScan = { startScan() },
-                                    onClear = { history.clear() },
-                                )
-
-                                Page.SETTINGS -> SettingsPage(
-                                    settings = settings,
-                                    onDevice = { page = Page.DEVICE },
-                                    onAbout = { page = Page.ABOUT },
-                                    onClearHistory = { history.clear() },
-                                    onCheckUpdate = { updateController.checkManual(scope) },
-                                )
-
-                                Page.DEVICE -> DevicePage(
-                                    result = result,
-                                    onBack = { page = Page.SETTINGS },
-                                )
-
-                                Page.ABOUT -> AboutPage(
-                                    result = result,
-                                    onBack = { page = Page.SETTINGS },
-                                )
-                            }
-                        }
-
-                        // Miuix 模式的浮动底栏只在主标签页出现
-                        if (uiMode == UiMode.Miuix && isMain) {
-                            Box(Modifier.align(Alignment.BottomCenter)) {
-                                RsBottomBar(
-                                    tabs = tabs,
-                                    current = page,
-                                    onSelect = {
-                                        // 导航埋点：供自动化回归判断切页是否生效
-                                        android.util.Log.i("RootSentinel", "nav=$it")
-                                        page = it
-                                    },
-                                )
-                            }
-                        }
+    val reportState = ReportUiState(
+        hasResult = result != null,
+        scanning = scan.scanning,
+        gradeWord = result?.let { gradeWord(it.score.grade) } ?: "",
+        gradeKind = result?.let { gradeKindOf(it.score.grade) } ?: 0,
+        scoreLines = result?.let {
+            listOf(
+                "Root" to it.score.rootScore.toInt().toString(),
+                "完整性" to it.score.integrityScore.toInt().toString(),
+                "Hook" to it.score.hookScore.toInt().toString(),
+                "环境" to it.score.environmentScore.toInt().toString(),
+                "覆盖率" to "${(it.score.coverage * 100).toInt()}%",
+                "置信度" to it.score.confidence.name,
+            )
+        } ?: emptyList(),
+        notes = result?.score?.notes ?: emptyList(),
+        hits = result?.items?.filter { it.verdict == Verdict.HIT } ?: emptyList(),
+        unknowns = result?.items?.filter { it.verdict == Verdict.UNKNOWN } ?: emptyList(),
+        all = result?.items ?: emptyList(),
+        elapsedText = result?.let {
+            if (it.elapsedMs >= 1000) String.format("%.1f s", it.elapsedMs / 1000.0) else "${it.elapsedMs} ms"
+        } ?: "",
+    )
+    val reportActions = ReportActions(
+        onRescan = { mainPagerState.animateToPage(0) },
+        onExport = {
+            val r = result
+            if (r == null) {
+                Toast.makeText(ctx, "暂无可导出的报告", Toast.LENGTH_SHORT).show()
+            } else {
+                scope.launch(Dispatchers.IO) {
+                    val f = runCatching { JsonExporter.export(ctx, r) }.getOrNull()
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(
+                            ctx,
+                            if (f != null) "报告已保存" else "报告已导出到下载目录",
+                            Toast.LENGTH_SHORT,
+                        ).show()
                     }
-
-                    // 首次使用声明（v2.22.46）：未确认过就弹，确认后不再出现。
-                    if (!settings.declarationSeen) {
-                        DeclarationDialog(
-                            onConfirm = { settings.declarationSeen = true },
-                        )
-                    }
-
-                    // 更新弹窗（v2.22.47）：发现新版 / 手动检查时出现。
-                    if (updateController.dialogVisible) {
-                        UpdateDialog(
-                            controller = updateController,
-                            context = ctx,
-                            scope = scope,
-                        )
-                    }
-                }
-
-                when (uiMode) {
-                    UiMode.Miuix -> top.yukonga.miuix.kmp.basic.Scaffold(
-                        topBar = {
-                            RsTopBar(
-                                title = title,
-                                large = isMain,
-                                onBack = backTarget?.let { t -> { page = t } },
-                            )
-                        },
-                        bottomBar = {},
-                        containerColor = palette.background,
-                        content = content,
-                    )
-                    UiMode.Material -> androidx.compose.material3.Scaffold(
-                        topBar = {
-                            RsTopBar(
-                                title = title,
-                                large = isMain,
-                                onBack = backTarget?.let { t -> { page = t } },
-                            )
-                        },
-                        bottomBar = {
-                            if (isMain) {
-                                RsBottomBar(
-                                    tabs = tabs,
-                                    current = page,
-                                    onSelect = {
-                                        android.util.Log.i("RootSentinel", "nav=$it")
-                                        page = it
-                                    },
-                                )
-                            }
-                        },
-                        containerColor = palette.background,
-                        content = content,
-                    )
                 }
             }
-            if (uiMode == UiMode.Material) {
-                androidx.compose.material3.MaterialTheme(
-                    colorScheme = matColors,
-                    content = themed,
-                )
-            } else {
-                themed()
+        },
+        onOpenItem = { e -> detail = e; subPage = SubPage.DETAIL },
+    )
+
+    val settingsActions = SettingsScreenActions(
+        onSetCheckUpdate = { settings.checkUpdate = it },
+        onSetCheckModuleUpdate = { settings.checkModuleUpdate = it },
+        onOpenTheme = { subPage = SubPage.THEME },
+        onSetUiModeIndex = { idx ->
+            settings.uiMode = UiMode.entries.getOrElse(idx) { UiMode.Miuix }.value
+        },
+        onOpenProfileTemplate = {},
+        onSetSuCompatMode = {},
+        onSetKernelUmountEnabled = {},
+        onSetSelinuxHideEnabled = {},
+        onSetSulogEnabled = {},
+        onSetAdbRootEnabled = {},
+        onSetShellSuAdbOnlyEnabled = {},
+        onSetDefaultUmountModules = {},
+        onSetEnableWebDebugging = {},
+        onSetAutoJailbreak = {},
+        onSetUseSoftReboot = {},
+        onOpenAbout = { subPage = SubPage.ABOUT },
+    )
+    val rsPrivacy = RsPrivacyState(
+        telemetryEnabled = settings.telemetryEnabled,
+        autoExport = settings.autoExport,
+        keepHistory = settings.keepHistory,
+    )
+    val rsActions = RsSettingsActions(
+        onSetTelemetryEnabled = { settings.telemetryEnabled = it },
+        onSetAutoExport = { settings.autoExport = it },
+        onSetKeepHistory = { settings.keepHistory = it },
+        onCheckUpdateClick = {
+            updateController.dialogVisible = true
+            updateController.checkManual(scope)
+        },
+        onOpenDevice = { subPage = SubPage.DEVICE },
+    )
+    val paletteState = ColorPaletteUiState(
+        uiState = settingsUiState,
+        currentColorMode = appSettings.colorMode,
+        currentPaletteStyle = runCatching { PaletteStyle.valueOf(settings.colorStyle) }
+            .getOrElse { PaletteStyle.TonalSpot },
+        currentColorSpec = runCatching { ColorSpec.SpecVersion.valueOf(settings.colorSpec) }
+            .getOrElse { ColorSpec.SpecVersion.SPEC_2025 },
+    )
+    val paletteActions = ColorPaletteScreenActions(
+        onBack = { subPage = SubPage.NONE },
+        onSetThemeMode = { settings.themeMode = it },
+        onSetMiuixMonet = { settings.miuixMonet = it },
+        onSetKeyColor = { settings.keyColor = it },
+        onSetColorMode = { settings.themeMode = it.value },
+        onSetColorStyle = { settings.colorStyle = it },
+        onSetColorSpec = { settings.colorSpec = it },
+        onSetEnableBlur = { settings.enableBlur = it },
+        onSetEnableFloatingBottomBar = { settings.enableFloatingBottomBar = it },
+        onSetEnableFloatingBottomBarBlur = { settings.enableFloatingBottomBarBlur = it },
+        onSetEnableNavigationBadge = { settings.enableNavigationBadge = it },
+        onSetEnablePredictiveBack = { settings.enablePredictiveBack = it },
+        onSetEnableSwipeDismiss = { settings.enableSwipeDismiss = it },
+        onSetPagerInterceptionMode = { settings.pagerInterceptionMode = it },
+        onSetPageScale = { settings.pageScale = it },
+        onSetModuleDescriptionMaxLines = { settings.moduleDescriptionMaxLines = it },
+    )
+
+    val badge = NavigationBadgeState(
+        moduleUpdatableCount = if (homeState.hasUpdate) 1 else 0,
+    )
+
+    // ------------------------------------------------------------ 返回处理
+    if (subPage != SubPage.NONE) {
+        if (settings.enablePredictiveBack) {
+            val navEventState = rememberNavigationEventState(NavigationEventInfo.None)
+            NavigationBackHandler(
+                state = navEventState,
+                isBackEnabled = true,
+                onBackCompleted = { subPage = SubPage.NONE },
+            )
+        } else {
+            BackHandler { subPage = SubPage.NONE }
+        }
+    } else if (pagerState.settledPage != 0) {
+        BackHandler { mainPagerState.animateToPage(0) }
+    }
+
+    // ------------------------------------------------------------ 主题与骨架
+    val systemDensity = LocalDensity.current
+    val density = remember(systemDensity, settings.pageScale) {
+        Density(systemDensity.density * settings.pageScale, systemDensity.fontScale)
+    }
+    CompositionLocalProvider(
+        LocalUiMode provides uiMode,
+        LocalColorMode provides appSettings.colorMode.value,
+        LocalEnableBlur provides settings.enableBlur,
+        LocalEnableFloatingBottomBar provides settings.enableFloatingBottomBar,
+        LocalEnableFloatingBottomBarBlur provides settings.enableFloatingBottomBarBlur,
+        LocalEnableNavigationBadge provides settings.enableNavigationBadge,
+        LocalModuleDescriptionMaxLines provides settings.moduleDescriptionMaxLines,
+        LocalDensity provides density,
+    ) {
+        KernelSUTheme(appSettings = appSettings, uiMode = uiMode) {
+            val content: @Composable () -> Unit = {
+                if (subPage != SubPage.NONE) {
+                    var dragTotal by remember { mutableStateOf(0f) }
+                    Box(
+                        Modifier.then(
+                            if (settings.enableSwipeDismiss) {
+                                Modifier.pointerInput(Unit) {
+                                    detectHorizontalDragGestures(
+                                        onDragStart = { dragTotal = 0f },
+                                        onHorizontalDrag = { _, amount -> dragTotal += amount },
+                                        onDragEnd = {
+                                            if (dragTotal > 96.dp.toPx()) subPage = SubPage.NONE
+                                        },
+                                    )
+                                }
+                            } else {
+                                Modifier
+                            },
+                        ),
+                    ) {
+                        when (subPage) {
+                            SubPage.SCAN -> if (uiMode == UiMode.Miuix) {
+                                ScanScreenMiuix(scan) { scan.cancelRequested = true }
+                            } else {
+                                ScanScreenMaterial(scan) { scan.cancelRequested = true }
+                            }
+                            SubPage.DETAIL -> detail?.let { e ->
+                                if (uiMode == UiMode.Miuix) {
+                                    DetailScreenMiuix(e) { subPage = SubPage.NONE }
+                                } else {
+                                    DetailScreenMaterial(e) { subPage = SubPage.NONE }
+                                }
+                            }
+                            SubPage.DEVICE -> if (uiMode == UiMode.Miuix) {
+                                DeviceScreenMiuix { subPage = SubPage.NONE }
+                            } else {
+                                DeviceScreenMaterial { subPage = SubPage.NONE }
+                            }
+                            SubPage.ABOUT -> if (uiMode == UiMode.Miuix) {
+                                AboutScreenMiuix({ subPage = SubPage.NONE }, ::openUrl)
+                            } else {
+                                AboutScreenMaterial({ subPage = SubPage.NONE }, ::openUrl)
+                            }
+                            SubPage.THEME -> if (uiMode == UiMode.Miuix) {
+                                ColorPaletteScreenMiuix(paletteState, paletteActions)
+                            } else {
+                                ColorPaletteScreenMaterial(paletteState, paletteActions)
+                            }
+                            SubPage.NONE -> Unit
+                        }
+                    }
+                } else {
+                    MainScreen(
+                        mainPagerState = mainPagerState,
+                        pagerInterceptionMode = settings.pagerInterceptionMode,
+                        navigationBadge = badge,
+                    ) { page, bottomPad ->
+                        when (page) {
+                            0 -> if (uiMode == UiMode.Miuix) {
+                                HomePagerMiuix(homeState, homeActions, bottomPad)
+                            } else {
+                                HomePagerMaterial(homeState, homeActions, bottomPad)
+                            }
+                            1 -> if (uiMode == UiMode.Miuix) {
+                                ReportPagerMiuix(reportState, reportActions, bottomPad)
+                            } else {
+                                ReportPagerMaterial(reportState, reportActions, bottomPad)
+                            }
+                            2 -> if (uiMode == UiMode.Miuix) {
+                                HistoryPagerMiuix(history.entries, { history.clear() }, bottomPad)
+                            } else {
+                                HistoryPagerMaterial(history.entries, { history.clear() }, bottomPad)
+                            }
+                            else -> if (uiMode == UiMode.Miuix) {
+                                SettingPagerMiuix(settingsUiState, settingsActions, bottomPad, rsPrivacy, rsActions)
+                            } else {
+                                SettingPagerMaterial(settingsUiState, settingsActions, bottomPad, rsPrivacy, rsActions)
+                            }
+                        }
+                    }
+                }
+            }
+            when (uiMode) {
+                UiMode.Material -> androidx.compose.material3.Scaffold(
+                    containerColor = androidx.compose.material3.MaterialTheme.colorScheme.surfaceContainer,
+                ) { _ -> content() }
+                UiMode.Miuix -> Scaffold { _ -> content() }
+            }
+
+            // 弹窗层
+            if (!settings.declarationSeen) {
+                DeclarationDialog { settings.declarationSeen = true }
+            }
+            if (updateController.dialogVisible) {
+                UpdateDialog(updateController) { updateController.dialogVisible = false }
             }
         }
     }
 }
 
 /**
- * 页面"深度"排序：用来决定切换动画的方向。
- * 详情/设备/关于属于更深一层（从右侧推进来）。
+ * 照 KSU MainScreen 的骨架：HorizontalPager + 液态玻璃背板 +
+ * FloatingBottomBar / SideRail 双形态。
  */
-private fun pageRank(p: Page): Float = when (p) {
-    Page.HOME -> 0f
-    Page.SCAN -> 1f
-    Page.REPORT -> 2f
-    Page.DETAIL -> 2.5f
-    Page.HISTORY -> 3f
-    Page.SETTINGS -> 4f
-    Page.DEVICE -> 4.5f
-    Page.ABOUT -> 4.6f
+@Composable
+private fun MainScreen(
+    mainPagerState: MainPagerState,
+    pagerInterceptionMode: Int,
+    navigationBadge: NavigationBadgeState,
+    pages: @Composable (page: Int, bottomInnerPadding: Dp) -> Unit,
+) {
+    val uiMode = LocalUiMode.current
+    val enableBlur = LocalEnableBlur.current
+    val enableFloatingBottomBar = LocalEnableFloatingBottomBar.current
+    val enableFloatingBottomBarBlur = LocalEnableFloatingBottomBarBlur.current
+    val useRail = useNavigationRail(enableFloatingBottomBar)
+    val pagerMode = PagerInterceptionMode.entries.getOrElse(pagerInterceptionMode) {
+        PagerInterceptionMode.Native
+    }
+    val interceptPagerGestures = pagerMode == PagerInterceptionMode.CrossAxisInterceptor
+    val surfaceColor = when (uiMode) {
+        UiMode.Material -> androidx.compose.material3.MaterialTheme.colorScheme.surface
+        UiMode.Miuix -> MiuixTheme.colorScheme.surface
+    }
+    val blurBackdrop = rememberBlurBackdrop(enableBlur)
+    val backdrop = rememberLayerBackdrop {
+        drawRect(surfaceColor)
+        drawContent()
+    }
+
+    val currentPage = mainPagerState.pagerState.currentPage
+    LaunchedEffect(currentPage) {
+        mainPagerState.syncPage()
+    }
+
+    CompositionLocalProvider(
+        me.weishu.kernelsu.ui.LocalMainPagerState provides mainPagerState,
+    ) {
+        val pagerContent: @Composable (Dp) -> Unit = { bottomInnerPadding ->
+            Box(
+                modifier = if (blurBackdrop != null) Modifier.layerBackdrop(blurBackdrop) else Modifier,
+            ) {
+                HorizontalPager(
+                    modifier = Modifier
+                        .pagerGestureOverride(
+                            pagerState = mainPagerState.pagerState,
+                            mode = pagerMode,
+                            enabled = true,
+                        )
+                        .then(
+                            if (enableFloatingBottomBar && enableFloatingBottomBarBlur) {
+                                Modifier.layerBackdrop(backdrop)
+                            } else {
+                                Modifier
+                            },
+                        ),
+                    state = mainPagerState.pagerState,
+                    beyondViewportPageCount = 3,
+                    overscrollEffect = null,
+                    userScrollEnabled = !interceptPagerGestures,
+                    pageNestedScrollConnection = if (interceptPagerGestures) {
+                        PagerGestureNestedScrollConnection
+                    } else {
+                        PagerDefaults.pageNestedScrollConnection(
+                            state = mainPagerState.pagerState,
+                            orientation = Orientation.Horizontal,
+                        )
+                    },
+                    flingBehavior = PagerDefaults.flingBehavior(
+                        state = mainPagerState.pagerState,
+                        snapAnimationSpec = PagerNavigationSpringSpec,
+                    ),
+                ) { page ->
+                    pages(page, bottomInnerPadding)
+                }
+            }
+        }
+
+        if (useRail) {
+            val startInsets = WindowInsets.systemBars.union(WindowInsets.displayCutout)
+                .only(WindowInsetsSides.Start)
+            val navBarBottomPadding = WindowInsets.systemBars.asPaddingValues()
+                .calculateBottomPadding()
+            when (uiMode) {
+                UiMode.Material -> androidx.compose.material3.Scaffold(
+                    containerColor = androidx.compose.material3.MaterialTheme.colorScheme.surfaceContainer,
+                ) { _ ->
+                    Row {
+                        SideRail(navigationBadge)
+                        Box(Modifier.weight(1f).consumeWindowInsets(startInsets)) {
+                            pagerContent(navBarBottomPadding)
+                        }
+                    }
+                }
+                UiMode.Miuix -> Scaffold { _ ->
+                    Row {
+                        SideRail(navigationBadge)
+                        Box(Modifier.weight(1f).consumeWindowInsets(startInsets)) {
+                            pagerContent(navBarBottomPadding)
+                        }
+                    }
+                }
+            }
+        } else {
+            val bottomBar: @Composable () -> Unit = {
+                Box(Modifier.fillMaxWidth()) {
+                    BottomBar(
+                        blurBackdrop = blurBackdrop,
+                        backdrop = backdrop,
+                        navigationBadge = navigationBadge,
+                        modifier = Modifier.align(Alignment.BottomCenter),
+                    )
+                }
+            }
+            when (uiMode) {
+                UiMode.Material -> androidx.compose.material3.Scaffold(
+                    bottomBar = bottomBar,
+                    containerColor = androidx.compose.material3.MaterialTheme.colorScheme.surfaceContainer,
+                ) { innerPadding ->
+                    pagerContent(innerPadding.calculateBottomPadding())
+                }
+                UiMode.Miuix -> Scaffold(bottomBar = bottomBar) { innerPadding ->
+                    pagerContent(innerPadding.calculateBottomPadding())
+                }
+            }
+        }
+    }
 }

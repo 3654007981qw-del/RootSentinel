@@ -10,7 +10,7 @@ set -o pipefail
 # cleaned, so a failed or partial compile could ship stale classes.
 SRC=$HOME/workspace/rs2240-src/RootSentinel
 RB=$HOME/workspace/rs2241-build
-DEPS=$RB/deps
+DEPS=${RS_DEPS:-$RB/deps}
 WORK=$RB/work
 SDK=$HOME/android-sdk
 BT=$SDK/build-tools/35.0.1
@@ -19,8 +19,8 @@ NDK=$SDK/ndk/27.2.12479018
 JAVAC=/usr/lib/jvm/java-21-openjdk-amd64/bin/javac
 JAVA=/usr/lib/jvm/java-21-openjdk-amd64/bin/java
 APPID=com.rootsentinel
-VCODE=22259
-VNAME=2.22.59
+VCODE=22260
+VNAME=2.22.60
 # 本次构建的签名身份：rsbuild 的 rs.jks（AURORA 侧密钥）。
 # native 基线注入同一证书指纹，保证 I.APK_SIGNATURE 自洽。
 SIGNER_SHA=06377C87CB33D9AB1B0BAE330135AB67404AB96DEEA9F3584DDF2B2FFCDC7A06
@@ -148,13 +148,21 @@ stage_kotlin() {
   wc -l < "$WORK/sources.txt"
   rm -rf "$WORK/kotlin-classes"
   mkdir -p "$WORK/kotlin-classes"
-  "$JAVA" -Xmx1400m -cp "$DEPS/kotlin-compiler-embeddable-2.2.20.jar:$DEPS/kotlin-stdlib-2.3.20.jar:$DEPS/kotlin-reflect-2.2.20.jar:$WORK/jars/org.jetbrains.kotlinx_kotlinx-coroutines-core-jvm_1.9.0.jar:$DEPS/org.jetbrains.intellij.deps_trove4j_1.0.20200330.jar:$DEPS/org.jetbrains_annotations_23.0.0.jar" \
+  local COMPILER_JAR=$(ls "$DEPS"/*kotlin-compiler-embeddable-*.jar | sort -V | tail -1)
+  local PLUGIN_JAR=$(ls "$DEPS"/*kotlin-compose-compiler-plugin-embeddable-*.jar | sort -V | tail -1)
+  local STDLIB_JAR=$(ls "$WORK"/jars/*kotlin-stdlib-2*.jar | sort -V | tail -1)
+  local REFLECT_JAR=$(ls "$DEPS"/*kotlin-reflect-*.jar | sort -V | tail -1)
+  local COROUTINES_JAR=$(ls "$WORK"/jars/*kotlinx-coroutines-core-jvm-*.jar | sort -V | tail -1)
+  local TROVE_JAR=$(ls "$DEPS"/*trove4j*.jar | head -1)
+  local ANNOT_JAR=$(ls "$DEPS"/*annotations-23*.jar | head -1)
+  "$JAVA" -Xmx1400m -cp "$COMPILER_JAR:$STDLIB_JAR:$REFLECT_JAR:$COROUTINES_JAR:$TROVE_JAR:$ANNOT_JAR" \
     org.jetbrains.kotlin.cli.jvm.K2JVMCompiler \
     -cp "$CP" -d "$WORK/kotlin-classes" \
-    -Xplugin="$DEPS/kotlin-compose-compiler-plugin-embeddable-2.2.20.jar" \
+    -Xplugin="$PLUGIN_JAR" \
     -jvm-target 17 -no-stdlib -no-reflect \
     -Xcontext-parameters -Xskip-metadata-version-check \
     -opt-in=androidx.compose.material3.ExperimentalMaterial3Api \
+    -opt-in=androidx.compose.material3.ExperimentalMaterial3ExpressiveApi \
     -opt-in=androidx.compose.foundation.ExperimentalFoundationApi \
     -opt-in=androidx.compose.animation.ExperimentalAnimationApi \
     -opt-in=kotlinx.coroutines.ExperimentalCoroutinesApi \

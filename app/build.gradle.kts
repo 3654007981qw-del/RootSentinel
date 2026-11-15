@@ -112,8 +112,8 @@ android {
         applicationId = "com.rootsentinel"
         minSdk = 26
         targetSdk = 36
-        versionCode = 22259
-        versionName = "2.22.59"
+        versionCode = 22260
+        versionName = "2.22.60"
 
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
@@ -186,36 +186,43 @@ android {
 }
 
 dependencies {
-    implementation("androidx.core:core-ktx:1.13.1")
-    implementation("androidx.activity:activity-compose:1.9.3")
-    implementation(platform("androidx.compose:compose-bom:2024.12.01"))
+    // v2.22.60：依赖栈与 KernelSU 管理器对齐（Kotlin 2.4.20、Compose BOM
+    // 2026.09.00、material3 1.5.0-alpha28、miuix 0.9.4 模块化坐标）。
+    // 手工管线（tools/manual-build）用同一套版本解析（deps2/resolved.txt）。
+    implementation("androidx.core:core-ktx:1.18.0")
+    implementation("androidx.activity:activity-compose:1.13.0")
+    implementation(platform("androidx.compose:compose-bom:2026.09.00"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.foundation:foundation")
-    implementation("androidx.compose.material3:material3")
-    implementation("androidx.compose.material:material-icons-core")
+    implementation("androidx.compose.material3:material3:1.5.0-alpha28")
+    implementation("androidx.compose.material:material-icons-extended")
 
-    // Miuix —— HyperOS 风格 Compose 组件库
-    implementation("top.yukonga.miuix.kmp:miuix:0.8.8")
-    // Miuix 内部已用 kyant-shapes（implementation，不传递）：backdrop 的 lens()
-    // 需要 RoundedRectangularShape / Capsule，这里显式声明同一坐标，保证编译可见且不重复。
-    implementation("io.github.kyant0:shapes:1.2.0")
+    // Miuix 0.9.4 —— HyperOS 风格 Compose 组件库（模块化坐标）
+    implementation("top.yukonga.miuix.kmp:miuix-ui-android:0.9.4")
+    implementation("top.yukonga.miuix.kmp:miuix-blur-android:0.9.4")
+    implementation("top.yukonga.miuix.kmp:miuix-preference-android:0.9.4")
+    implementation("top.yukonga.miuix.kmp:miuix-icons-android:0.9.4")
+    implementation("top.yukonga.miuix.kmp:miuix-nav-android:0.9.4")
 
-    // v2.22.45（审查 B P2-08）：单元测试。org.json 需要真实实现
-    // （android.jar 里的是桩），JUnit 跑协议严格性 / DER 向量 / 去重。
+    // KernelSU 界面栈的其余依赖：动态取色、Markdown 渲染、WebView 资源加载、
+    // 预测性返回手势、生命周期
+    implementation("com.materialkolor:material-kolor-android:5.0.1")
+    implementation("com.squareup.okhttp3:okhttp:5.5.0")
+    implementation("org.commonmark:commonmark:0.30.0")
+    implementation("org.commonmark:commonmark-ext-autolink:0.30.0")
+    implementation("org.commonmark:commonmark-ext-gfm-strikethrough:0.30.0")
+    implementation("org.commonmark:commonmark-ext-gfm-tables:0.30.0")
+    implementation("org.commonmark:commonmark-ext-task-list-items:0.30.0")
+    implementation("androidx.webkit:webkit:1.17.0")
+    implementation("androidx.navigationevent:navigationevent-compose:1.1.2")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.11.0")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.11.0")
+
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
+
+    // 单元测试。org.json 需要真实实现（android.jar 里的是桩），
+    // JUnit 跑协议严格性 / DER 向量 / 去重。
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20231013")
 
-
-    // 液态玻璃：三个候选库已逐一实测（2026-11-08），结论全部无法直接依赖：
-//   · io.github.kyant0:backdrop 2.0.1 —— aar 声明 minCompileSdk=37，
-//     可用 android.experimental.disableCompileSdkChecks 豁免；但它依赖 Compose 1.12.0，
-//     而 Compose 1.12 的 aar 元数据要求 AGP 9.1.0+，本机 AGP 8.9.1 → 硬阻断，无法豁免。
-//   · Kashif-E/KMPLiquidGlass —— 内嵌 backdrop 源码，自身用 AGP 8.13.1 + Compose 1.10.0，
-//     源码可读，但要移植到 Compose 1.7 需逐 API 核对。
-//   · NadeemIqbal/liquid-glass —— 9 star，未发布到 Maven Central，能力是磨砂而非折射。
-// 结论：AGSL 只用到 API 33 的 RenderEffect.createRuntimeShaderEffect，
-// 本工程自实现（GlassEffect.kt）反而没有版本限制。已吸收其中两处真正有价值的设计：
-// 色差（dispersion）与三级质量回退（GlassQuality）。
-
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 }

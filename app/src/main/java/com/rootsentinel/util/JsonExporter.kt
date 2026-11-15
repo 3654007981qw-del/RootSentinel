@@ -43,6 +43,9 @@ object JsonExporter {
         "?"
     }
 
+    /** 报告 JSON 文本（供发送日志/分享等内存路径使用，不落盘） */
+    fun toJsonString(result: DetectorEngine.Result): String = buildJson(result).toString()
+
     fun export(context: Context, result: DetectorEngine.Result): File? {
         appVersion = readVersion(context)
         return try {

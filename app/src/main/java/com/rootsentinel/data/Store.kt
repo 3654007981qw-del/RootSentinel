@@ -2,6 +2,8 @@ package com.rootsentinel.data
 
 import android.content.Context
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.rootsentinel.engine.DetectorEngine
@@ -166,6 +168,146 @@ class SettingsStore(context: Context) {
             sp.edit().putInt("colorMode", v).apply()
         }
 
+    // ---- v2.22.60：KernelSU 外观设置全套（照抄 KSU 的 ThemeController 口径） ----
+    // 下面每一项都被照抄过来的 KSU 主题/底栏代码真实消费，经
+    // me.weishu.kernelsu.data.repository.SettingsRepositoryImpl 桥接读取。
+    // themeMode 用 KSU ColorMode 的值域（0 系统/1 浅/2 深/3..5 Monet/6 AMOLED 深），
+    // 首次读取时以 .59 的 colorMode（0/1/2）为默认迁移。
+
+    /** KSU ColorMode 值（0..6）。KernelSUTheme/ThemeController 真实消费。 */
+    private var _themeMode by mutableStateOf(sp.getInt("themeMode", sp.getInt("colorMode", 0)))
+    var themeMode: Int
+        get() = _themeMode
+        set(v) {
+            _themeMode = v
+            sp.edit().putInt("themeMode", v).apply()
+        }
+
+    /** Miuix 模式下是否启用 Monet 取色。ThemeController 真实消费。 */
+    private var _miuixMonet by mutableStateOf(sp.getBoolean("miuixMonet", false))
+    var miuixMonet: Boolean
+        get() = _miuixMonet
+        set(v) {
+            _miuixMonet = v
+            sp.edit().putBoolean("miuixMonet", v).apply()
+        }
+
+    /** 主题种子色（0 = 无/默认）。material-kolor 生成色板时真实消费。 */
+    private var _keyColor by mutableStateOf(sp.getInt("keyColor", 0))
+    var keyColor: Int
+        get() = _keyColor
+        set(v) {
+            _keyColor = v
+            sp.edit().putInt("keyColor", v).apply()
+        }
+
+    /** 色板风格（material-kolor PaletteStyle 名）。真实消费。 */
+    private var _colorStyle by mutableStateOf(sp.getString("colorStyle", "TonalSpot") ?: "TonalSpot")
+    var colorStyle: String
+        get() = _colorStyle
+        set(v) {
+            _colorStyle = v
+            sp.edit().putString("colorStyle", v).apply()
+        }
+
+    /** 色彩规范版本（SPEC_2021 / SPEC_2025）。真实消费。 */
+    private var _colorSpec by mutableStateOf(sp.getString("colorSpec", "SPEC_2025") ?: "SPEC_2025")
+    var colorSpec: String
+        get() = _colorSpec
+        set(v) {
+            _colorSpec = v
+            sp.edit().putString("colorSpec", v).apply()
+        }
+
+    /** 顶栏/底栏毛玻璃模糊总开关（LocalEnableBlur）。真实消费。 */
+    private var _enableBlur by mutableStateOf(sp.getBoolean("enableBlur", true))
+    var enableBlur: Boolean
+        get() = _enableBlur
+        set(v) {
+            _enableBlur = v
+            sp.edit().putBoolean("enableBlur", v).apply()
+        }
+
+    /**
+     * 浮动底栏开关（LocalEnableFloatingBottomBar）。默认开——这是用户
+     * 明确要的 KernelSU 液态玻璃浮动底栏；关掉则回到底部贴边栏。
+     */
+    private var _enableFloatingBottomBar by mutableStateOf(sp.getBoolean("enableFloatingBottomBar", true))
+    var enableFloatingBottomBar: Boolean
+        get() = _enableFloatingBottomBar
+        set(v) {
+            _enableFloatingBottomBar = v
+            sp.edit().putBoolean("enableFloatingBottomBar", v).apply()
+        }
+
+    /** 浮动底栏的液态玻璃模糊（LocalEnableFloatingBottomBarBlur）。默认开。 */
+    private var _enableFloatingBottomBarBlur by mutableStateOf(sp.getBoolean("enableFloatingBottomBarBlur", true))
+    var enableFloatingBottomBarBlur: Boolean
+        get() = _enableFloatingBottomBarBlur
+        set(v) {
+            _enableFloatingBottomBarBlur = v
+            sp.edit().putBoolean("enableFloatingBottomBarBlur", v).apply()
+        }
+
+    /** 底栏角标开关（LocalEnableNavigationBadge）。真实消费。 */
+    private var _enableNavigationBadge by mutableStateOf(sp.getBoolean("enableNavigationBadge", true))
+    var enableNavigationBadge: Boolean
+        get() = _enableNavigationBadge
+        set(v) {
+            _enableNavigationBadge = v
+            sp.edit().putBoolean("enableNavigationBadge", v).apply()
+        }
+
+    /** 宽屏导航栏展开状态（照抄的 NavigationRail 组件读写）。 */
+    private var _navigationRailExpanded by mutableStateOf(sp.getBoolean("navigationRailExpanded", true))
+    var navigationRailExpanded: Boolean
+        get() = _navigationRailExpanded
+        set(v) {
+            _navigationRailExpanded = v
+            sp.edit().putBoolean("navigationRailExpanded", v).apply()
+        }
+
+    /** 自动检查更新（照抄的 KSU 设置项 checkUpdate）。RootApp 真实消费：关则启动不查。 */
+    private var _checkUpdate by mutableStateOf(sp.getBoolean("checkUpdate", true))
+    var checkUpdate: Boolean
+        get() = _checkUpdate
+        set(v) {
+            _checkUpdate = v
+            sp.edit().putBoolean("checkUpdate", v).apply()
+        }
+
+    // ---- KernelSU 外观设置补齐（v2.22.60 照抄 KSU 设置面所需） ----
+
+    private var _enablePredictiveBack by mutableStateOf(sp.getBoolean("enablePredictiveBack", false))
+    var enablePredictiveBack: Boolean
+        get() = _enablePredictiveBack
+        set(v) { _enablePredictiveBack = v; sp.edit().putBoolean("enablePredictiveBack", v).apply() }
+
+    private var _enableSwipeDismiss by mutableStateOf(sp.getBoolean("enableSwipeDismiss", true))
+    var enableSwipeDismiss: Boolean
+        get() = _enableSwipeDismiss
+        set(v) { _enableSwipeDismiss = v; sp.edit().putBoolean("enableSwipeDismiss", v).apply() }
+
+    private var _pagerInterceptionMode by mutableIntStateOf(sp.getInt("pagerInterceptionMode", 1))
+    var pagerInterceptionMode: Int
+        get() = _pagerInterceptionMode
+        set(v) { _pagerInterceptionMode = v; sp.edit().putInt("pagerInterceptionMode", v).apply() }
+
+    private var _pageScale by mutableFloatStateOf(sp.getFloat("pageScale", 1.0f))
+    var pageScale: Float
+        get() = _pageScale
+        set(v) { _pageScale = v; sp.edit().putFloat("pageScale", v).apply() }
+
+    private var _moduleDescriptionMaxLines by mutableIntStateOf(sp.getInt("moduleDescriptionMaxLines", 4))
+    var moduleDescriptionMaxLines: Int
+        get() = _moduleDescriptionMaxLines
+        set(v) { _moduleDescriptionMaxLines = v; sp.edit().putInt("moduleDescriptionMaxLines", v).apply() }
+
+    private var _checkModuleUpdate by mutableStateOf(sp.getBoolean("checkModuleUpdate", true))
+    var checkModuleUpdate: Boolean
+        get() = _checkModuleUpdate
+        set(v) { _checkModuleUpdate = v; sp.edit().putBoolean("checkModuleUpdate", v).apply() }
+
     /** 扫描完成后自动导出 JSON。默认关闭。 */
     private var _autoExport by mutableStateOf(sp.getBoolean("autoExport", false))
     var autoExport: Boolean
@@ -208,4 +350,14 @@ class SettingsStore(context: Context) {
             _telemetryEnabled = v
             sp.edit().putBoolean("telemetryEnabled", v).apply()
         }
+}
+/**
+ * 最新报告 JSON 的提供者（v2.22.60）：照抄过来的 KernelSU 设置页里有
+ * 「发送日志」入口，其对话框（component/miuix/SendLogDialog 的 RS 接缝）
+ * 通过这里拿到当前最新报告的 JSON 再走系统文档选择器导出。
+ * MainActivity 在 RootApp 里安装（有结果时返回报告 JSON，否则 null）。
+ */
+object LatestReportProvider {
+    @Volatile
+    var latestReportJson: (() -> String?)? = null
 }
