@@ -45,9 +45,14 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.navigationevent.NavigationEvent
 import androidx.navigationevent.NavigationEventInfo
+import androidx.navigationevent.NavigationEventTransitionState
 import androidx.navigationevent.compose.NavigationBackHandler
 import androidx.navigationevent.compose.rememberNavigationEventState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.ui.graphics.graphicsLayer
 import com.materialkolor.PaletteStyle
 import com.materialkolor.dynamiccolor.ColorSpec
 import com.rootsentinel.data.HistoryEntry
@@ -472,9 +477,27 @@ fun RootApp(auto: String?, initialTab: Int, initialSub: String?) {
     )
 
     // ------------------------------------------------------------ 返回处理
+    // v2.22.63: predictive back must DRIVE the page visually. Previously
+    // NavigationBackHandler only fired onBackCompleted at gesture end —
+    // during the swipe nothing moved, so the feature looked dead even
+    // when enabled. The gesture progress now offsets the sub-page
+    // container in real time (and eases back to 0 on cancel).
+    val navEventState = rememberNavigationEventState(NavigationEventInfo.None)
+    val backProgress = remember { Animatable(0f) }
+    if (settings.enablePredictiveBack) {
+        LaunchedEffect(navEventState.transitionState) {
+            val ts = navEventState.transitionState
+            if (ts is NavigationEventTransitionState.InProgress) {
+                val ev = ts.latestEvent
+                val sign = if (ev.swipeEdge == NavigationEvent.EDGE_RIGHT) -1f else 1f
+                backProgress.snapTo(ev.progress * sign)
+            } else {
+                backProgress.animateTo(0f, tween(180))
+            }
+        }
+    }
     if (subPage != SubPage.NONE) {
         if (settings.enablePredictiveBack) {
-            val navEventState = rememberNavigationEventState(NavigationEventInfo.None)
             NavigationBackHandler(
                 state = navEventState,
                 isBackEnabled = true,
@@ -507,7 +530,13 @@ fun RootApp(auto: String?, initialTab: Int, initialSub: String?) {
                 if (subPage != SubPage.NONE) {
                     var dragTotal by remember { mutableStateOf(0f) }
                     Box(
-                        Modifier.then(
+                        Modifier.graphicsLayer {
+                            val p = backProgress.value
+                            translationX = p * size.width * 0.3f
+                            val sc = 1f - 0.05f * kotlin.math.abs(p)
+                            scaleX = sc
+                            scaleY = sc
+                        }.then(
                             if (settings.enableSwipeDismiss) {
                                 Modifier.pointerInput(Unit) {
                                     detectHorizontalDragGestures(

@@ -112,8 +112,8 @@ android {
         applicationId = "com.rootsentinel"
         minSdk = 26
         targetSdk = 36
-        versionCode = 22262
-        versionName = "2.22.62"
+        versionCode = 22263
+        versionName = "2.22.63"
 
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
@@ -169,10 +169,12 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions {
-        jvmTarget = "17"
-        // backdrop 库用了 Kotlin 2.2 的 context parameters
-        freeCompilerArgs += "-Xcontext-parameters"
+    kotlin {
+        compilerOptions {
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+            // backdrop 库用了 Kotlin 2.2 的 context parameters
+            freeCompilerArgs.add("-Xcontext-parameters")
+        }
     }
 
     buildFeatures { compose = true; buildConfig = true }
