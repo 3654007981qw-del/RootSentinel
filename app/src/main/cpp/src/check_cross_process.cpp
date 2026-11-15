@@ -15,6 +15,8 @@
 #include <cstring>
 #include <unistd.h>
 #include <atomic>
+#include <mutex>
+#include <vector>
 #include <sys/wait.h>
 
 #include "rs_str.h"
@@ -62,12 +64,24 @@ Probe3 probeNoAlloc() {
 }  // namespace
 
 void checkCrossProcess(ScanReport& r) {
-    // 只做一次，避免每次检测都 fork
+    // 只做一次，避免每次检测都 fork；成功结果缓存，后续扫描重放缓存。
     // v2.22.45（审查 A P2-20）：改用 atomic —— 当前 nativeScan 有
     // 互斥串行化所以旧 bool 写法没出过问题，但放开并发后即是数据
     // 竞争，先把隐患堵上。
+    // v2.22.58（第九轮审计 P3-02）：旧写法在 pipe/fork 之前就把 done
+    // 置真，首次瞬时失败会永久关掉这项检查，后续扫描连 UNKNOWN 都
+    // 不再产生。现在只有拿到完整观测才缓存并置 done；失败只给本次
+    // 扫描补一条 UNKNOWN，下次扫描重试。
     static std::atomic<bool> done{false};
-    if (done.exchange(true)) return;
+    static std::mutex cacheMutex;
+    static std::vector<Evidence> cachedEvidence;
+    static std::vector<CrossCheck> cachedCrosses;
+    if (done.load(std::memory_order_acquire)) {
+        std::lock_guard<std::mutex> lk(cacheMutex);
+        for (const auto& cc : cachedCrosses) r.addCross(cc);
+        for (const auto& e : cachedEvidence) r.add(e);
+        return;
+    }
 
     int fds[2];
     if (pipe(fds) != 0) {
@@ -126,6 +140,7 @@ void checkCrossProcess(ScanReport& r) {
 
     // v2.22.45（审查 B P2-04）：结构化 CrossCheck 生产者（证据本体
     // 仍是下方 X.CHILD_PROC；这里只登记 crosses 供评分层使用）。
+    std::vector<CrossCheck> crosses;
     {
         CrossCheck cc;
         cc.id = RSs("X.CHILD_PROC");
@@ -133,16 +148,17 @@ void checkCrossProcess(ScanReport& r) {
         cc.observe(RSs("child"), childStr);
         cc.observe(RSs("parent"), parentStr);
         cc.consistent = same;
-        r.addCross(cc);
+        crosses.push_back(cc);
     }
 
+    std::vector<Evidence> out;
     if (same) {
         Evidence e = makePass(RSs("X.CHILD_PROC"), Category::CROSSCHECK,
                               RSs("父子进程观测一致"));
         e.addVector(RSs("child"), childStr);
         e.addVector(RSs("parent"), parentStr);
         e.detail = RSs("v/s/a = version可读/stat可读/data_adb(V=可见 E=EACCES N=不存在)");
-        r.add(std::move(e));
+        out.push_back(std::move(e));
     } else {
         Evidence e = makeHit(RSs("X.CHILD_PROC"), Category::CROSSCHECK,
                              Severity::CRITICAL, Confidence::HIGH,
@@ -153,8 +169,18 @@ void checkCrossProcess(ScanReport& r) {
                        "只可能是 hook 只作用在其中一个进程上");
         e.fp_note = RSs("极少数内核在 fork 后短暂继承不同的挂载视图，"
                         "若出现请连续跑三次确认可复现");
-        r.add(std::move(e));
+        out.push_back(std::move(e));
     }
+
+    // 观测完整才落缓存并置 done（P3-02）；之后扫描直接重放缓存。
+    {
+        std::lock_guard<std::mutex> lk(cacheMutex);
+        cachedEvidence = out;
+        cachedCrosses = crosses;
+    }
+    done.store(true, std::memory_order_release);
+    for (const auto& cc : crosses) r.addCross(cc);
+    for (const auto& e : out) r.add(e);
 }
 
 }  // namespace rs

@@ -570,6 +570,22 @@ object Updater {
         return -1
     }
 
+    /**
+     * 解析 Content-Range 头（`bytes start-end/total`，total 可为 `*`）。
+     * 返回 (start, end, total)，total 未知为 -1；格式不合返回 null。
+     * 纯函数，供单测锁定（v2.22.58，第九轮审计 P2-02）。
+     */
+    fun parseContentRange(header: String?): Triple<Long, Long, Long>? {
+        if (header == null) return null
+        val m = Regex("""bytes (\d+)-(\d+)/(\d+|\*)""").matchEntire(header.trim()) ?: return null
+        val s = m.groupValues[1].toLongOrNull() ?: return null
+        val e = m.groupValues[2].toLongOrNull() ?: return null
+        val t = if (m.groupValues[3] == "*") -1L else m.groupValues[3].toLongOrNull() ?: return null
+        if (e < s) return null
+        if (t >= 0 && e >= t) return null
+        return Triple(s, e, t)
+    }
+
     private sealed interface RangeResult {
         fun close()
 
@@ -621,9 +637,17 @@ object Updater {
                     current = loc
                 }
                 code == 206 -> {
-                    val cr = conn.getHeaderField("Content-Range")
-                    val t = cr?.substringAfterLast('/')?.toLongOrNull() ?: -1
-                    return RangeResult.Part(conn, t)
+                    // v2.22.58（第九轮审计 P2-02）：严格核对 Content-Range。
+                    // 起点必须与请求一致（否则字节会落到错误偏移）；终点
+                    // 不得越过请求终点（短于请求终点可以，downloadChunk
+                    // 会续请求剩余区间）；总长若给出必须大于终点。
+                    // 任一不合即弃用该响应、换源重试。
+                    val range = parseContentRange(conn.getHeaderField("Content-Range"))
+                    if (range == null || range.first != start || range.second > end) {
+                        conn.disconnect()
+                        return RangeResult.Fail(code)
+                    }
+                    return RangeResult.Part(conn, range.third)
                 }
                 code == 200 -> return RangeResult.Full(conn, conn.contentLengthLong)
                 else -> {
@@ -1026,6 +1050,13 @@ object Updater {
         val curCode = pm.getPackageInfo(context.packageName, 0).versionCodeCompat()
         if (newCode <= curCode) {
             return VerifyResult.Fail("安装包版本不高于当前版本")
+        }
+        // v2.22.58（第九轮审计 P2-03）：versionName 必须与发行标签一致，
+        // 防止发行元数据与实际安装包错位。
+        if (archive.versionName != info.versionName) {
+            return VerifyResult.Fail(
+                "安装包版本名与发行版本不一致（${archive.versionName} != ${info.versionName}）",
+            )
         }
         // 3) 签名证书必须与已安装应用完全一致
         val newSigs = signerDigests(archive.signaturesCompat())

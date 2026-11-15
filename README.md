@@ -4,7 +4,7 @@ Android Root 环境检测器 —— Kotlin / Jetpack Compose UI + C++ NDK 检测
 
 在自有设备上被动检测 Root 痕迹、Hook/注入、系统完整性破坏与运行环境异常，输出四维评分与逐项证据。**检测全程只读**：不执行 `su`、不提权、不修改系统。唯一的网络行为是**诊断摘要上报**（v2.22.46 起）：首次启动会弹出声明、经你同意后，每次扫描把一份字段最小化的摘要（版本、机型、评分与逐项结论；不含设备指纹、标识、路径与包名清单）经加密发送到项目接收端；设置里可随时关闭。另有应用内更新检查（只读公开的 Release 信息）。
 
-当前版本：**2.22.53**（见 [CHANGELOG](CHANGELOG.md)）
+当前版本：**2.22.58**（见 [CHANGELOG](CHANGELOG.md)）
 
 ## 设计原则
 
@@ -53,7 +53,7 @@ export RS_KS_PATH=/path/to/rs.jks RS_KS_PASS=*** RS_KS_ALIAS=*** RS_KEY_PASS=***
 
 - minSdk 26 / targetSdk 36；ABI：arm64-v8a、armeabi-v7a、x86_64（64 位满足 16 KB 页对齐）。
 - Release 开启 R8（含 JNI 按名回调的 keep 规则）。
-- 也可以用 Gradle 的 `externalNativeBuild` 直接构建 native，此时签名基线由 `build.gradle.kts` 从 keystore 读取后经 CMake 转发为编译定义。
+- Native 不由 Gradle 构建（`app/build.gradle.kts` 没有 `externalNativeBuild` 配置）：修改 C++ 后必须先运行根目录的 `native.sh` 重新编译三个 ABI 并更新 `app/src/main/jniLibs`，Gradle 只负责打包现成的 .so。只跑 Gradle 就改 C++ 不会生效（详见 BUILD-GRADLE.md）。
 
 ## 仓库结构
 

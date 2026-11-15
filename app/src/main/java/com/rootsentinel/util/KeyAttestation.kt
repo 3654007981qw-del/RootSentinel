@@ -244,10 +244,13 @@ object KeyAttestation {
             // v2.22.42：keymaster 交叉核对。attestationSecurityLevel
             // 声称 TEE/StrongBox，但 keymasterSecurityLevel = Software(0)
             // 时两字段矛盾 —— 至少有一侧被伪造，硬件级不成立。
-            // keymaster 解析不到（-1，老式/异常编码）时不单独否决，
-            // 由 attestation 侧与链校验兜底。
-            val hardwareBacked = parsed.securityLevel >= 1 &&
-                parsed.keymasterSecurityLevel != 0
+            // v2.22.58（第九轮审计 P2-05）：收紧缺失处理。此前 keymaster
+            // 解析不到（-1，老式/异常编码）时不单独否决、由链校验兜底；
+            // 现在安全关键字段缺失不再按硬件级处理 —— 两个字段都必须
+            // 明确为 TEE(1) 或 StrongBox(2)，缺失（-1）、Software(0）
+            // 或其他异常值一律不成立。
+            val hardwareBacked = parsed.securityLevel in 1..2 &&
+                parsed.keymasterSecurityLevel in 1..2
 
             // v2.22.41：链根锚定也进公式。
             // 之前 rootIsGoogle 只算不用 —— verifyChain 只证明「链自洽」

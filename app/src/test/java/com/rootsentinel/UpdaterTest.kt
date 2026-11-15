@@ -145,6 +145,31 @@ class UpdaterTest {
         assertEquals(16_233_585L, big.last().last)
     }
 
+    // ---- v2.22.58 Content-Range 严格解析（第九轮审计 P2-02） ----
+
+    @Test
+    fun contentRangeParsesValid() {
+        assertEquals(Triple(0L, 99L, 1000L), Updater.parseContentRange("bytes 0-99/1000"))
+        assertEquals(Triple(500L, 999L, 1000L), Updater.parseContentRange("bytes 500-999/1000"))
+        assertEquals(Triple(0L, 0L, 1L), Updater.parseContentRange("bytes 0-0/1"))
+        // total 未知（*）→ -1
+        assertEquals(Triple(10L, 20L, -1L), Updater.parseContentRange("bytes 10-20/*"))
+        // 前后空白容忍
+        assertEquals(Triple(0L, 99L, 1000L), Updater.parseContentRange("  bytes 0-99/1000 "))
+    }
+
+    @Test
+    fun contentRangeRejectsMalformed() {
+        assertEquals(null, Updater.parseContentRange(null))
+        assertEquals(null, Updater.parseContentRange(""))
+        assertEquals(null, Updater.parseContentRange("bytes 99-0/1000")) // end < start
+        assertEquals(null, Updater.parseContentRange("bytes 0-1000/1000")) // end >= total
+        assertEquals(null, Updater.parseContentRange("items 0-99/1000")) // 单位不对
+        assertEquals(null, Updater.parseContentRange("bytes 0-99")) // 缺 total
+        assertEquals(null, Updater.parseContentRange("bytes -99/1000")) // 缺 start
+        assertEquals(null, Updater.parseContentRange("bytes 0-99/1000 extra")) // 尾部垃圾
+    }
+
     // ---- v2.22.55 测速选源与速度显示 ----
 
     @Test

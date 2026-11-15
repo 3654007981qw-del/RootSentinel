@@ -511,7 +511,19 @@ object ScoringModel {
                         (x.confidence.multiplier * 100).toInt() -
                         (if (x.heuristic) 50 else 0)
                 }
-                if (rank(e) > rank(prev)) best[e.id] = e
+                // v2.22.58（第九轮审计 P3-01）：rank 全平时再用内容字典序
+                // 做稳定平局裁决，保证同一批证据无论扫描阶段顺序如何
+                // （阶段顺序是 shuffled 的）都保留同一条，报告可复现。
+                // 平局时评分字段全同，选哪条不影响分数，只影响文案。
+                val tieKey = { x: Evidence ->
+                    x.title + '' + x.detail + '' +
+                        x.vectors.joinToString("") + '' + x.fpNote + '' + x.verifyNote
+                }
+                if (rank(e) > rank(prev) ||
+                    (rank(e) == rank(prev) && tieKey(e) < tieKey(prev))
+                ) {
+                    best[e.id] = e
+                }
             }
             deduped += best.values
             val dropped = items.size - deduped.size
