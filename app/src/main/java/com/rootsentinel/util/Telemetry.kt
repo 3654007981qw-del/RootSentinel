@@ -35,13 +35,13 @@ import java.net.URL
 object Telemetry {
 
     /**
-     * 接收端地址（HTTPS）。v2.22.47 起填入正式地址：阿里云函数
-     * 计算（华东2上海）rootsentinel-report 的 HTTP 触发器，
-     * 2026-11-15 部署并实测通过（合法载荷 200、坏载荷 400）。
-     * 置空即回到待命状态、实际不发送。
+     * 接收端地址（HTTPS）。v2.22.47 起填入正式地址；v2.22.54 起
+     * 迁至 Cloudflare Workers（rootsentinel-report），2026-11-15
+     * 部署并实测通过（合法载荷 200、重放/篡改/明文 401、报告落库）。
+     * 协议与密钥不变。置空即回到待命状态、实际不发送。
      */
     const val UPLOAD_ENDPOINT: String =
-        "https://rootsenl-report-gekphiyrcn.cn-shanghai.fcapp.run"
+        "https://rootsentinel-report.3654007981qw.workers.dev"
 
     /** 是否已配置接收端。未配置时上传与开关都只是待命状态。 */
     val configured: Boolean get() = UPLOAD_ENDPOINT.isNotBlank()
