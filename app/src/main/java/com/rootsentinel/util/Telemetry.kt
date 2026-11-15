@@ -30,11 +30,13 @@ import java.net.URL
 object Telemetry {
 
     /**
-     * 接收端地址（HTTPS）。**当前为空 = 功能待命、实际不发送。**
-     * 作者部署好接收端后把地址填在这里即可生效，格式如
-     * "https://example.com/rootsentinel/report"。
+     * 接收端地址（HTTPS）。v2.22.47 起填入正式地址：阿里云函数
+     * 计算（华东2上海）rootsentinel-report 的 HTTP 触发器，
+     * 2026-11-15 部署并实测通过（合法载荷 200、坏载荷 400）。
+     * 置空即回到待命状态、实际不发送。
      */
-    const val UPLOAD_ENDPOINT: String = ""
+    const val UPLOAD_ENDPOINT: String =
+        "https://rootsenl-report-gekphiyrcn.cn-shanghai.fcapp.run"
 
     /** 是否已配置接收端。未配置时上传与开关都只是待命状态。 */
     val configured: Boolean get() = UPLOAD_ENDPOINT.isNotBlank()

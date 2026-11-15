@@ -12,6 +12,8 @@
          移除本权限；本次按作者要求加回，同意模型与字段最小化见
          DeclarationDialog 文案与 Telemetry 类注释。 -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- 应用内更新（2.22.47）：下载新版后调起系统安装所需 -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
         android:enableOnBackInvokedCallback="true"
@@ -40,5 +42,16 @@
             android:name=".engine.ProbeService"
             android:exported="false"
             android:process=":probe" />
+
+        <!-- 应用内更新：把 cacheDir/updates 下的 APK 以 content:// 交给系统安装器 -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="com.rootsentinel.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 </manifest>

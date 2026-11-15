@@ -181,6 +181,12 @@ fun RootApp() {
     val history = remember { HistoryStore(ctx) }
     val engine = remember { DetectorEngine(ctx) }
     val scan = remember { ScanState() }
+    // 应用内更新（v2.22.47）：声明确认后每次启动自动查一次新版，
+    // 查到才弹窗；设置页有手动入口。检查走 GitHub/Gitee 发布接口。
+    val updateController = remember { UpdateController() }
+    LaunchedEffect(settings.declarationSeen) {
+        if (settings.declarationSeen) updateController.checkAuto(scope)
+    }
     // 背景层：改用 backdrop 库的 LayerBackdrop（与 KSU 内部同一套实现）。
     // 之前用自己写的 GraphicsLayer 录制，绘制端也自己写；现在录制与绘制都用库。
     val backdrop = com.kyant.backdrop.backdrops.rememberLayerBackdrop()
@@ -532,6 +538,7 @@ fun RootApp() {
                         onDevice = { page = Page.DEVICE },
                         onAbout = { page = Page.ABOUT },
                         onClearHistory = { history.clear() },
+                        onCheckUpdate = { updateController.checkManual(scope) },
                     )
 
                     Page.DEVICE -> DevicePage(
@@ -564,6 +571,15 @@ fun RootApp() {
                 if (!settings.declarationSeen) {
                     DeclarationDialog(
                         onConfirm = { settings.declarationSeen = true },
+                    )
+                }
+
+                // 更新弹窗（v2.22.47）：发现新版 / 手动检查时出现。
+                if (updateController.dialogVisible) {
+                    UpdateDialog(
+                        controller = updateController,
+                        context = ctx,
+                        scope = scope,
                     )
                 }
             }

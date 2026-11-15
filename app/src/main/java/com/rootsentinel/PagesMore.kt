@@ -11,8 +11,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.ExitToApp
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.ui.platform.LocalUriHandler
+import com.rootsentinel.util.Updater
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -249,7 +253,9 @@ fun SettingsPage(
     onDevice: () -> Unit,
     onAbout: () -> Unit,
     onClearHistory: () -> Unit,
+    onCheckUpdate: () -> Unit,
 ) {
+    val uriHandler = LocalUriHandler.current
     val c = MiuixTheme.colorScheme
 
     PageScroll {
@@ -305,6 +311,26 @@ fun SettingsPage(
                     fontSize = 12.sp,
                     color = c.onBackgroundVariant,
                     modifier = Modifier.padding(bottom = 12.dp),
+                )
+            }
+        }
+
+        Spacer(Modifier.height(16.dp))
+        SmallTitle("版本与更新")
+        RsCard {
+            Column {
+                IconRow(
+                    icon = Icons.Filled.Refresh,
+                    title = "检查更新",
+                    sub = "当前版本 ${RootSentinelVersion.NAME} · 手动检查一次",
+                    onClick = { onCheckUpdate() },
+                )
+                ThinDivider(indent = false)
+                IconRow(
+                    icon = Icons.Filled.ExitToApp,
+                    title = "GitHub 仓库",
+                    sub = "AURORA-0711/RootSentinel · 源码与版本发布",
+                    onClick = { uriHandler.openUri(Updater.REPO_URL) },
                 )
             }
         }
