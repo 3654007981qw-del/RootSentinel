@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.22.62 — 2026-11-15
+
+**修复 v2.22.61 两处闪退**（真机日志定位）：
+
+1. **点「开始检测」闪退** — `IllegalArgumentException: Key "D.MEMFD_SOFT" was already used`。检测引擎会对同一检查项产出两条结果（如 D.MEMFD_SOFT），而报告/扫描实时列表用检查项 id 作 LazyColumn 的 key，id 重复即崩。五处列表 key 全部改为「序号 + id」组合（itemsIndexed），引擎产出重复项时列表也不再崩。
+2. **切换界面风格闪退** — `NoClassDefFoundError: androidx/compose/material3/ripple/RippleKt`。material3 1.5.0-alpha28 把 ripple 拆成了独立构件（material3-ripple / material-ripple），只写在 Gradle 模块元数据里，手工管线的 POM 依赖抓取漏了这两个包，运行时 material3 自己的涟漪节点找不到类。已补齐两个构件（deps2 135 → 137），并对新 dex 做了一次「引用类 vs 定义类」全量审计，确认没有同类缺失。
+
 ## 2.22.61 — 2026-11-15
 
 **修复 v2.22.60 打开即闪退。** 崩溃日志定位：`BootstrapMethodError` 出在 miuix 的 `PagerSwipeNode` / `TiltFeedback` 内部——手工管线用的 R8 8.6.2-dev（build-tools 自带）在重命名 kotlinx.coroutines 接口后，没能正确改写 miuix 预编译类里的 invokedynamic lambda 引导方法，第一帧手势节点启动即崩。

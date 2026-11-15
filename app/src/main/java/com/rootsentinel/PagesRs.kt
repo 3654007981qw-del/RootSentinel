@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
@@ -187,7 +188,7 @@ fun ReportPagerMiuix(state: ReportUiState, actions: ReportActions, bottomInnerPa
             }
             if (state.hits.isNotEmpty()) {
                 item { SmallTitle("命中项（${state.hits.size}）") }
-                items(state.hits, key = { "hit-" + it.id }) { e ->
+                itemsIndexed(state.hits, key = { idx, e -> "hit-$idx-" + e.id }) { _, e ->
                     Card(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
                         BasicComponent(
                             title = e.title,
@@ -202,7 +203,7 @@ fun ReportPagerMiuix(state: ReportUiState, actions: ReportActions, bottomInnerPa
             }
             if (state.unknowns.isNotEmpty()) {
                 item { SmallTitle("未知项（${state.unknowns.size}）") }
-                items(state.unknowns, key = { "unk-" + it.id }) { e ->
+                itemsIndexed(state.unknowns, key = { idx, e -> "unk-$idx-" + e.id }) { _, e ->
                     Card(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
                         BasicComponent(
                             title = e.title,
@@ -216,7 +217,7 @@ fun ReportPagerMiuix(state: ReportUiState, actions: ReportActions, bottomInnerPa
                 }
             }
             item { SmallTitle("全部检测项（${state.all.size}）") }
-            items(state.all, key = { "all-" + it.id }) { e ->
+            itemsIndexed(state.all, key = { idx, e -> "all-$idx-" + e.id }) { _, e ->
                 Card(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
                     BasicComponent(
                         title = e.title,
@@ -389,7 +390,7 @@ fun HistoryPagerMiuix(
                 }
                 return@LazyColumn
             }
-            items(entries, key = { it.at }) { e ->
+            itemsIndexed(entries, key = { idx, e -> "h$idx-" + e.at }) { _, e ->
                 Card(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
                     BasicComponent(
                         title = "${fmtTime(e.at)} · ${historyGradeWord(e.grade)}",
@@ -523,7 +524,7 @@ fun ScanScreenMiuix(scan: ScanState, onCancel: () -> Unit) {
             }
             if (scan.live.isNotEmpty()) {
                 item { SmallTitle("实时命中") }
-                items(scan.live, key = { it.id }) { li ->
+                itemsIndexed(scan.live, key = { idx, li -> "live-$idx-" + li.id }) { _, li ->
                     Card(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
                         BasicComponent(title = li.title, summary = "${li.id} · ${li.severity}")
                     }
