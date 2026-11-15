@@ -52,6 +52,19 @@ for f in glob.glob(os.path.join(WORK, "aar", "*", "assets", "**", "*"), recursiv
         os.makedirs(os.path.dirname(dest), exist_ok=True)
         shutil.copy(f, dest)
 
+# 应用自身 assets（src/main/assets）：v2.22.64 修复——.60 照抄 KernelSU 的
+# markdown 组件时漏带了它的 webview 模板资源，GithubMarkdown 打开
+# webview/template.html 抛 FileNotFoundException，更新弹窗一渲染就闪退。
+# Gradle 构建会自动打包 app assets，手工管线必须显式收；同名时以应用为准。
+APP_ASSETS = os.path.expanduser(
+    "~/workspace/rs2240-src/RootSentinel/app/src/main/assets")
+for f in glob.glob(os.path.join(APP_ASSETS, "**", "*"), recursive=True):
+    if os.path.isfile(f):
+        rel = os.path.relpath(f, APP_ASSETS)
+        dest = os.path.join(stage, "assets", rel)
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        shutil.copy(f, dest)
+
 # 服务资源（协程 MainDispatcherFactory 等靠它发现；同名保留先出现的一份）。
 # v2.22.53（第八轮审查 P2-02 配套）：release 走 R8 后，服务接口与
 # 实现类都被改名，R8 已把 META-INF/services 按新名重写在其产物

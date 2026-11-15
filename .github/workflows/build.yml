@@ -26,23 +26,18 @@ jobs:
         run: |
           yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
           "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "platforms;android-35" "build-tools;35.0.1"
-          # API 37 平台：包名在不同渠道可能是 android-37 或 android-37.0，
-          # 两个都试；都装不上也不让本步失败——AGP 在许可证已接受时会
-          # 自行下载缺失平台。ls 输出用于确认 runner 实际有哪些平台。
-          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37" || "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37.0" || true
-          ls "$ANDROID_SDK_ROOT/platforms" || true
-          # AGP 8.9 按路径 platforms;android-37 找平台目录，而 runner 预装的
-          # 是 android-37.0（37 起平台目录带小版本号）——补一个符号链接。
-          if [ -d "$ANDROID_SDK_ROOT/platforms/android-37.0" ] && [ ! -e "$ANDROID_SDK_ROOT/platforms/android-37" ]; then ln -s android-37.0 "$ANDROID_SDK_ROOT/platforms/android-37"; fi
+          # API 37 平台用 runner 预装的 android-37.0（AGP 9.4 的
+          # compileSdk release(37) + minorApiLevel 能直接识别带小
+          # 版本号的平台目录，sdkmanager 里没有 platforms;android-37 这个包）。
 
       # gradle.properties 被 .gitignore 排除（2026-11-14 清理后定下的
       # 规矩：防签名密码误入该文件再被提交），所以 CI 里没有这个
       # 文件；构建必需的非机密属性用 -P 显式传入。
       - name: Unit tests
-        run: ./gradlew :app:testDebugUnitTest -Pandroid.useAndroidX=true -Pandroid.suppressUnsupportedCompileSdk=37
+        run: ./gradlew :app:testDebugUnitTest -Pandroid.useAndroidX=true
 
       - name: Assemble debug
-        run: ./gradlew :app:assembleDebug -Pandroid.useAndroidX=true -Pandroid.suppressUnsupportedCompileSdk=37
+        run: ./gradlew :app:assembleDebug -Pandroid.useAndroidX=true
 
   native:
     # v2.22.53（第八轮审查 P3-02）：此前 CI 只有上面的 Gradle job，
