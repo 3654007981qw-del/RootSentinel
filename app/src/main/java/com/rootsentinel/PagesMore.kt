@@ -277,6 +277,23 @@ fun SettingsPage(
                     Modifier.fillMaxWidth().height(52.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    Text("上传诊断摘要", fontSize = 15.sp, color = c.onBackground, modifier = Modifier.weight(1f))
+                    GlassSwitch(
+                        checked = settings.telemetryEnabled,
+                        onCheckedChange = { settings.telemetryEnabled = it },
+                    )
+                }
+                Text(
+                    "开启时，每次扫描后上传不含设备标识的诊断摘要（版本、机型、评分与逐项判定），用于改良检测准确率。关闭后立即停止上传。",
+                    fontSize = 12.sp,
+                    color = c.onBackgroundVariant,
+                    modifier = Modifier.padding(bottom = 12.dp),
+                )
+                ThinDivider(indent = false)
+                Row(
+                    Modifier.fillMaxWidth().height(52.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     Text("记录扫描历史", fontSize = 15.sp, color = c.onBackground, modifier = Modifier.weight(1f))
                     GlassSwitch(
                         checked = settings.keepHistory,

@@ -161,4 +161,29 @@ class SettingsStore(context: Context) {
             _keepHistory = v
             sp.edit().putBoolean("keepHistory", v).apply()
         }
+
+    /**
+     * 是否已看过首次使用声明（v2.22.46）。false 时 RootApp 弹声明，
+     * 且 Telemetry 一律不上传——先声明、后上传，顺序不能反。
+     */
+    private var _declarationSeen by mutableStateOf(sp.getBoolean("declarationSeen", false))
+    var declarationSeen: Boolean
+        get() = _declarationSeen
+        set(v) {
+            _declarationSeen = v
+            sp.edit().putBoolean("declarationSeen", v).apply()
+        }
+
+    /**
+     * 诊断摘要上传开关（v2.22.46）。默认开启：声明的同意模型是
+     * 「继续使用即同意」；用户在设置里关掉后立即停传。字段口径
+     * 见 util/Telemetry 类注释。
+     */
+    private var _telemetryEnabled by mutableStateOf(sp.getBoolean("telemetryEnabled", true))
+    var telemetryEnabled: Boolean
+        get() = _telemetryEnabled
+        set(v) {
+            _telemetryEnabled = v
+            sp.edit().putBoolean("telemetryEnabled", v).apply()
+        }
 }

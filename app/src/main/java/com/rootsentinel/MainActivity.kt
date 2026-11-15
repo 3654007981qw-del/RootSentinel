@@ -259,6 +259,16 @@ fun RootApp() {
                     // settings.autoExport 之前**只有设置页在写、没有任何地方读** ——
                     // 开关存在但功能根本没实现，用户打开它什么也不会发生。
                     // 这里补上：扫描完成后按开关决定是否落盘 JSON。
+                    // ---------------------------------------------------------- 诊断摘要上传
+                    // v2.22.46：声明已确认 + 开关开启才传。未确认声明时
+                    // 一律不传（顺序见 SettingsStore.declarationSeen）。
+                    // 接收端未配置时 Telemetry.upload 内部直接返回。
+                    if (settings.declarationSeen && settings.telemetryEnabled) {
+                        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                            com.rootsentinel.util.Telemetry.upload(r)
+                        }
+                    }
+
                     if (settings.autoExport) {
                         // v2.22.44（P2-08）：导出移出主线程。此前这段在
                         // withContext(Main) 块里同步跑，JSON 构建 + 写盘
@@ -549,6 +559,13 @@ fun RootApp() {
                     },
                     modifier = Modifier.align(Alignment.BottomCenter),
                 )
+
+                // 首次使用声明（v2.22.46）：未确认过就弹，确认后不再出现。
+                if (!settings.declarationSeen) {
+                    DeclarationDialog(
+                        onConfirm = { settings.declarationSeen = true },
+                    )
+                }
             }
         }
     }

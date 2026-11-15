@@ -8,6 +8,10 @@
     <uses-permission
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
+    <!-- v2.22.46：诊断摘要上传专用（util/Telemetry）。v2.22.43 曾
+         移除本权限；本次按作者要求加回，同意模型与字段最小化见
+         DeclarationDialog 文案与 Telemetry 类注释。 -->
+    <uses-permission android:name="android.permission.INTERNET" />
 
     <application
         android:enableOnBackInvokedCallback="true"
