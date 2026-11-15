@@ -144,6 +144,28 @@ class SettingsStore(context: Context) {
     // 功能（主题切换 / 动效与震动接线）时连功能一起加回来。
     // SharedPreferences 里的旧键保留不管，不影响任何东西。
 
+    /**
+     * 界面风格（v2.22.59，新 UI 按 KernelSU 管理器的双模式结构）：
+     * "miuix"（默认）或 "material"。RootApp 真实消费：切换后整个
+     * 界面在 Miuix 主题与 Material 3 主题之间切换，不是摆设开关。
+     */
+    private var _uiMode by mutableStateOf(sp.getString("uiMode", "miuix") ?: "miuix")
+    var uiMode: String
+        get() = _uiMode
+        set(v) {
+            _uiMode = v
+            sp.edit().putString("uiMode", v).apply()
+        }
+
+    /** 深色模式（v2.22.59）：0 跟随系统 / 1 浅色 / 2 深色。RootApp 真实消费。 */
+    private var _colorMode by mutableStateOf(sp.getInt("colorMode", 0))
+    var colorMode: Int
+        get() = _colorMode
+        set(v) {
+            _colorMode = v
+            sp.edit().putInt("colorMode", v).apply()
+        }
+
     /** 扫描完成后自动导出 JSON。默认关闭。 */
     private var _autoExport by mutableStateOf(sp.getBoolean("autoExport", false))
     var autoExport: Boolean

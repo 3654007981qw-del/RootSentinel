@@ -1,168 +1,50 @@
 package com.rootsentinel
 
+import android.os.Build
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Build
+
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material.icons.filled.Warning
+
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberCoroutineScope
-import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import com.rootsentinel.data.HistoryEntry
-import com.rootsentinel.data.HistoryStore
-import com.rootsentinel.data.SettingsStore
 import com.rootsentinel.engine.DetectorEngine
 import com.rootsentinel.model.Evidence
 import com.rootsentinel.model.EvidenceState
 import com.rootsentinel.model.Grade
-import com.rootsentinel.model.Severity
 import com.rootsentinel.model.Verdict
 import com.rootsentinel.util.JsonExporter
-import top.yukonga.miuix.kmp.basic.Button
-import top.yukonga.miuix.kmp.basic.SmallTitle
-import top.yukonga.miuix.kmp.basic.Switch
-import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.theme.MiuixTheme
+import kotlinx.coroutines.launch
 
-// ============================================================ 公共小件
-
-/**
- * 顶栏（含状态栏）的实际高度。
- *
- * 页面内容**不**再被 Scaffold 的 topBar 占位推开，而是自己留出这段空白：
- * 这样滚动时内容会从玻璃顶栏下面滑过，顶栏才有东西可以模糊/折射。
- */
-val LocalTopInset = androidx.compose.runtime.compositionLocalOf { 0.dp }
-
-@Composable
-fun PageScroll(content: @Composable ColumnScope.() -> Unit) {
-    Column(
-        Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(
-                start = 16.dp,
-                end = 16.dp,
-                top = LocalTopInset.current + 8.dp,
-                // 让出玻璃底栏的高度。**故意留得比底栏矮一些**：
-                // 底栏实际占 76dp + 28dp 底距 + 手势条，这里给 BottomNavHeight - 32dp，
-                // 使最后一条内容会伸进玻璃后面 —— 液态玻璃的模糊/折射必须有东西可折，
-                // 否则在纯色背景上怎么调都只是"一块淡灰"。
-                bottom = BottomNavHeight - 56.dp,
-            ),
-        content = content,
-    )
-}
-
-/** 分隔线（Miuix 风格：左缩进 16dp、1dp 高） */
-@Composable
-fun ThinDivider(indent: Boolean = true) {
-    val c = MiuixTheme.colorScheme
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .padding(start = if (indent) 16.dp else 0.dp)
-            .height(1.dp)
-            .background(c.onBackground.copy(alpha = 0.08f)),
-    )
-}
-
-/** 细进度条（自绘，避免依赖具体 API 签名） */
-@Composable
-fun ThinProgress(fraction: Float, color: Color) {
-    val bg = MiuixTheme.colorScheme.onBackground.copy(alpha = 0.10f)
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .height(6.dp)
-            .clip(RoundedCornerShape(3.dp))
-            .background(bg),
-    ) {
-        Box(
-            Modifier
-                .fillMaxHeight()
-                .fillMaxWidth(fraction.coerceIn(0f, 1f))
-                .clip(RoundedCornerShape(3.dp))
-                .background(color),
-        )
-    }
-}
-
-/** 一行「标签 — 值」 */
-@Composable
-fun RowKV(name: String, value: String, valueColor: Color? = null) {
-    val c = MiuixTheme.colorScheme
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .height(48.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = name,
-            fontSize = 15.sp,
-            color = c.onBackground,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
-        Text(
-            text = value,
-            fontSize = 14.sp,
-            color = valueColor ?: c.onBackgroundVariant,
-            maxLines = 1,
-            softWrap = false,
-        )
-    }
-}
-
-/** 紧凑的两栏统计（Hero 卡右侧用） */
-@Composable
-fun StatLine(name: String, value: String) {
-    val c = MiuixTheme.colorScheme
-    Row(
-        Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
-        Text(
-            text = name,
-            fontSize = 12.sp,
-            color = c.onBackgroundVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
-        Text(
-            text = value,
-            fontSize = 13.sp,
-            color = c.onBackground,
-            maxLines = 1,
-            softWrap = false,
-        )
-    }
-}
+// ============================================================ 语义色与文案
+// 版式说明（v2.22.59）：页面结构按 KernelSU 管理器——
+// 首页 = 更新卡 → 警告卡 → 状态卡 → 信息卡；报告 = 结论卡 +
+// 分组卡片列表；详情 = 顶栏返回 + 分组卡片。组件走 KsuUi 的
+// 模式感知层（Miuix / Material 双外观），页面只写一份。
 
 fun gradeWord(g: Grade): String = when (g) {
     Grade.CLEAN -> "正常"
@@ -174,25 +56,24 @@ fun gradeWord(g: Grade): String = when (g) {
 
 @Composable
 fun gradeColor(g: Grade): Color {
-    val c = MiuixTheme.colorScheme
+    val p = LocalRsPalette.current
     return when (g) {
-        Grade.CLEAN -> Color(0xFF34C759)
-        Grade.SUSPICIOUS -> c.primary
-        Grade.ROOTED -> Color(0xFFFF3B30)
-        Grade.ROOTED_HIDING -> Color(0xFFFF3B30)
-        Grade.INCOMPLETE -> c.onBackgroundVariant
+        Grade.CLEAN -> RsStatusColors.Success
+        Grade.SUSPICIOUS -> p.primary
+        Grade.ROOTED -> RsStatusColors.Danger
+        Grade.ROOTED_HIDING -> RsStatusColors.Danger
+        Grade.INCOMPLETE -> p.onVariant
     }
 }
 
 @Composable
 fun severityColor(sev: String): Color {
-    val c = MiuixTheme.colorScheme
+    val p = LocalRsPalette.current
     return when (sev) {
-        "CRITICAL" -> Color(0xFFFF3B30)
-        "HIGH" -> Color(0xFFFF9500)
-        "MEDIUM" -> Color(0xFFFFCC00)
-        "LOW" -> c.onBackgroundVariant
-        else -> c.onBackgroundVariant
+        "CRITICAL" -> RsStatusColors.Danger
+        "HIGH" -> RsStatusColors.Warning
+        "MEDIUM" -> RsStatusColors.Medium
+        else -> p.onVariant
     }
 }
 
@@ -202,177 +83,123 @@ fun severityColor(sev: String): Color {
 fun HomePage(
     result: DetectorEngine.Result?,
     scanning: Boolean,
+    updateVersion: String?,
     onScan: () -> Unit,
     onDevice: () -> Unit,
+    onUpdateClick: () -> Unit,
 ) {
-    val c = MiuixTheme.colorScheme
+    val p = LocalRsPalette.current
     val s = result?.score
+
     PageScroll {
-        Spacer(Modifier.height(4.dp))
-
-        RsCard {
-            Row(
-                Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
+        // 更新卡（KernelSU 首页第一张：有新版才出现）
+        if (updateVersion != null) {
+            RsCard(
+                containerColor = p.primary.copy(alpha = 0.12f),
+                onClick = onUpdateClick,
             ) {
-                HeroGauge(
-                    fraction = if (s == null) 0f else (s.rootScore / 100.0).toFloat(),
-                    color = if (s == null) c.onBackgroundVariant else gradeColor(s.grade),
-                    size = 148.dp,
-                    strokeWidth = 10.dp,
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        if (s == null) {
-                            Text("—", fontSize = 30.sp, color = c.onBackgroundVariant)
-                        } else {
-                            AnimatedNumber(
-                                value = s.rootScore,
-                                fontSize = 32.sp,
-                                color = gradeColor(s.grade),
-                            )
-                        }
-                        Text(
-                            if (s == null) "未扫描" else s.grade.label,
-                            fontSize = 12.sp,
-                            color = if (s == null) c.onBackgroundVariant else gradeColor(s.grade),
-                        )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        RsText("新版本可用", RsTextStyle.Body, color = p.primary, fontWeight = FontWeight.Medium)
+                        RsText("v$updateVersion · 点此查看并更新", RsTextStyle.Caption, color = p.primary)
                     }
+                    RsText("›", RsTextStyle.TitleM, color = p.primary)
                 }
+            }
+            Spacer(Modifier.height(12.dp))
+        }
 
-                Spacer(Modifier.width(16.dp))
+        // 警告卡（上次结论不完整时提醒，不当作安全结论）
+        if (s != null && s.grade == Grade.INCOMPLETE) {
+            RsWarningCard("上次扫描检测面不完整，未能给出完整结论，建议重新检测。", RsWarningLevel.Notice)
+            Spacer(Modifier.height(12.dp))
+        }
 
+        // 状态卡（KernelSU StatusCard：整卡语义色 + 大图标 + 状态词）
+        val statusColor = if (s == null) null else gradeColor(s.grade)
+        RsCard(containerColor = statusColor) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                val icon = when {
+                    s == null -> Icons.Filled.Info
+                    s.grade == Grade.CLEAN -> Icons.Filled.CheckCircle
+                    s.grade == Grade.INCOMPLETE -> Icons.Filled.Info
+                    else -> Icons.Filled.Warning
+                }
+                val fg = if (statusColor != null) Color.White else p.onVariant
+                androidx.compose.material3.Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = fg,
+                    modifier = Modifier.size(40.dp),
+                )
+                Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("安全状态", fontSize = 13.sp, color = c.onBackgroundVariant)
-                    Spacer(Modifier.height(8.dp))
-                    StatLine(
-                        "可读率",
-                        if (result == null) "—" else "${(result.score.coverage * 100).toInt()}%",
+                    RsText(
+                        if (s == null) "尚未检测" else gradeWord(s.grade),
+                        RsTextStyle.TitleL,
+                        color = if (statusColor != null) Color.White else p.onBackground,
                     )
-                    Spacer(Modifier.height(6.dp))
-                    StatLine("检测项", if (result == null) "—" else "${result.items.size}")
-                    Spacer(Modifier.height(6.dp))
-                    StatLine("耗时", if (result == null) "—" else "${result.elapsedMs} ms")
+                    RsText(
+                        when {
+                            s == null -> "点下方按钮开始第一次检测"
+                            else -> "ROOT ${String.format("%.1f", s.rootScore)} · 覆盖率 ${(s.coverage * 100).toInt()}% · ${s.hitCount} 命中 / ${s.unknownCount} 未知"
+                        },
+                        RsTextStyle.BodyS,
+                        color = if (statusColor != null) Color.White.copy(alpha = 0.85f) else p.onVariant,
+                    )
                 }
             }
         }
 
         Spacer(Modifier.height(12.dp))
+        RsButton(
+            text = when {
+                scanning -> "正在扫描…"
+                result == null -> "开始检测"
+                else -> "重新检测"
+            },
+            onClick = onScan,
+            modifier = Modifier.fillMaxWidth(),
+            enabled = !scanning,
+        )
 
+        Spacer(Modifier.height(16.dp))
+        RsSectionTitle("设备信息")
         RsCard(insideMargin = RowCardMargin) {
             Column(Modifier.fillMaxWidth()) {
-                Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("ROOT 状态", fontSize = 15.sp, color = c.onBackground, modifier = Modifier.weight(1f))
-                    Text(
-                        if (s == null) "—" else String.format("%.1f", s.rootScore),
-                        fontSize = 14.sp,
-                        color = c.onBackgroundVariant,
-                        maxLines = 1,
-                        softWrap = false,
-                    )
-                }
-                ThinDivider(indent = false)
-                Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("系统完整性", fontSize = 15.sp, color = c.onBackground, modifier = Modifier.weight(1f))
-                    val txt = when {
-                        s == null -> "—"
-                        s.integrityBreach -> "启动链不可信"
-                        s.integrityScore > 0 -> "存疑"
-                        else -> "可信"
-                    }
-                    Text(txt, fontSize = 14.sp, color = c.onBackgroundVariant, maxLines = 1, softWrap = false)
-                }
-                ThinDivider(indent = false)
-                Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("运行环境", fontSize = 15.sp, color = c.onBackground, modifier = Modifier.weight(1f))
-                    val txt = if (s == null) "—" else if (s.envRisk) "存在风险" else "正常"
-                    Text(txt, fontSize = 14.sp, color = c.onBackgroundVariant, maxLines = 1, softWrap = false)
-                }
+                RsInfoRow(
+                    Icons.Filled.Phone, "设备",
+                    result?.profile?.let { "${it.brand} ${it.model}" }
+                        ?: "${Build.MANUFACTURER} ${Build.MODEL}",
+                )
+                RsDivider()
+                RsInfoRow(
+                    Icons.Filled.Build, "Android",
+                    "${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})",
+                )
+                RsDivider()
+                RsInfoRow(
+                    Icons.Filled.Lock, "SELinux",
+                    result?.items?.firstOrNull { it.id.startsWith("F.SELINUX") }?.title ?: "扫描后可见",
+                )
+                RsDivider()
+                RsInfoRow(
+                    Icons.Filled.Info, "应用版本",
+                    "RootSentinel ${RootSentinelVersion.NAME}",
+                )
             }
         }
 
         Spacer(Modifier.height(12.dp))
-
-        Row(Modifier.fillMaxWidth()) {
-            RsCard(Modifier.weight(1f)) {
-                Column {
-                    Text(
-                        if (result == null) "—" else "${(result.score.coverage * 100).toInt()}%",
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = c.primary,
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Text("覆盖率", fontSize = 12.sp, color = c.onBackgroundVariant)
-                }
-            }
-            Spacer(Modifier.width(12.dp))
-            RsCard(Modifier.weight(1f)) {
-                Column {
-                    Text(
-                        if (result == null) "—" else "${result.items.size}",
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = c.onBackground,
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Text("检测项", fontSize = 12.sp, color = c.onBackgroundVariant)
-                }
-            }
+        RsCard(insideMargin = RowCardMargin) {
+            RsNavRow(
+                icon = Icons.Filled.Info,
+                title = "全部设备信息",
+                sub = "系统 / 硬件 / 安全状态 / 运行环境",
+                onClick = onDevice,
+            )
         }
-
-        Spacer(Modifier.height(12.dp))
-
-        Row(Modifier.fillMaxWidth()) {
-            RsCard(Modifier.weight(1f)) {
-                Column {
-                    Text(
-                        if (s == null) "—" else "${s.hitCount}",
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = Color(0xFFFF9500),
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Text("风险项", fontSize = 12.sp, color = c.onBackgroundVariant)
-                }
-            }
-            Spacer(Modifier.width(12.dp))
-            RsCard(Modifier.weight(1f)) {
-                Column {
-                    Text(
-                        if (s == null) "—" else "${s.unknownCount}",
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = c.onBackgroundVariant,
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Text("UNKNOWN", fontSize = 12.sp, color = c.onBackgroundVariant)
-                }
-            }
-        }
-
-        Spacer(Modifier.height(12.dp))
-
-        RsCard(Modifier.clickable { onDevice() }) {
-            Row(Modifier.fillMaxWidth().height(56.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("设备", fontSize = 13.sp, color = c.onBackgroundVariant)
-                    Text(
-                        result?.profile?.let { "${it.brand} ${it.model}" } ?: "尚未扫描",
-                        fontSize = 15.sp,
-                        color = c.onBackground,
-                    )
-                }
-                Text("›", fontSize = 18.sp, color = c.onBackgroundVariant)
-            }
-        }
-
-        Spacer(Modifier.height(24.dp))
-
-        GlassButton(onClick = { onScan() }, modifier = Modifier.fillMaxWidth(), enabled = !scanning) {
-            Text(if (scanning) "正在扫描…" else "开始安全检测", fontSize = 16.sp)
-        }
-
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(8.dp))
     }
 }
 
@@ -380,84 +207,63 @@ fun HomePage(
 
 @Composable
 fun ScanPage(scan: ScanState, onRescan: () -> Unit, onCancel: () -> Unit) {
-    val c = MiuixTheme.colorScheme
+    val p = LocalRsPalette.current
     val elapsed = if (scan.startedAt > 0L) {
         ((if (scan.scanning) System.currentTimeMillis() else scan.startedAt) - scan.startedAt)
             .coerceAtLeast(0L)
     } else 0L
 
     PageScroll {
-        Spacer(Modifier.height(8.dp))
-        Text(
-            text = when {
-                scan.scanning -> scan.moduleName
-                scan.failed -> "扫描失败"
-                else -> "扫描完成"
-            },
-            fontSize = 20.sp,
-            fontWeight = FontWeight.Medium,
-            color = when {
-                scan.failed -> Color(0xFFFF3B30)
-                else -> c.onBackground
-            },
-        )
-        Spacer(Modifier.height(6.dp))
-        Text(
-            "阶段 ${scan.moduleIdx}/51   ·   ${String.format("%.1f", elapsed / 1000.0)} s",
-            fontSize = 12.sp,
-            color = c.onBackgroundVariant,
-        )
-
-        Spacer(Modifier.height(12.dp))
-        MiuixProgress(
-            fraction = if (scan.moduleIdx <= 0) 0f else scan.moduleIdx / 51f,
-            color = c.primary,
-            height = 8.dp,
-        )
-
-        Spacer(Modifier.height(16.dp))
-        Row(Modifier.fillMaxWidth()) {
-            RsCard(Modifier.weight(1f)) {
-                Column {
-                    Text("${scan.total}", fontSize = 22.sp, fontWeight = FontWeight.Medium, color = c.onBackground)
-                    Spacer(Modifier.height(4.dp))
-                    Text("已检测", fontSize = 12.sp, color = c.onBackgroundVariant)
-                }
-            }
-            Spacer(Modifier.width(12.dp))
-            RsCard(Modifier.weight(1f)) {
-                Column {
-                    Text("${scan.hit}", fontSize = 22.sp, fontWeight = FontWeight.Medium, color = Color(0xFFFF9500))
-                    Spacer(Modifier.height(4.dp))
-                    Text("命中", fontSize = 12.sp, color = c.onBackgroundVariant)
+        RsCard {
+            Column(Modifier.fillMaxWidth()) {
+                RsText(
+                    when {
+                        scan.scanning -> scan.moduleName
+                        scan.failed -> "扫描失败"
+                        else -> "扫描完成"
+                    },
+                    RsTextStyle.TitleM,
+                    color = if (scan.failed) RsStatusColors.Danger else p.onBackground,
+                )
+                Spacer(Modifier.height(6.dp))
+                RsText(
+                    "阶段 ${scan.moduleIdx}/51 · ${String.format("%.1f", elapsed / 1000.0)} s",
+                    RsTextStyle.Caption,
+                )
+                Spacer(Modifier.height(12.dp))
+                RsProgress(
+                    fraction = if (scan.moduleIdx <= 0) 0f else scan.moduleIdx / 51f,
+                    color = p.primary,
+                )
+                Spacer(Modifier.height(14.dp))
+                Row(Modifier.fillMaxWidth()) {
+                    Column(Modifier.weight(1f)) {
+                        RsText("${scan.total}", RsTextStyle.TitleL)
+                        RsText("已检测", RsTextStyle.Caption)
+                    }
+                    Column(Modifier.weight(1f)) {
+                        RsText("${scan.hit}", RsTextStyle.TitleL, color = RsStatusColors.Warning)
+                        RsText("命中", RsTextStyle.Caption)
+                    }
                 }
             }
         }
 
         if (scan.failed) {
             Spacer(Modifier.height(12.dp))
-            RsCard {
-                Column {
-                    Text("扫描未完成", fontSize = 15.sp, fontWeight = FontWeight.Medium, color = c.onBackground)
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "已完成 ${scan.total} 项，但检测面不完整，不应据此判断设备安全。",
-                        fontSize = 12.sp,
-                        color = c.onBackgroundVariant,
-                    )
-                }
-            }
+            RsWarningCard(
+                "扫描未完成：已完成 ${scan.total} 项，但检测面不完整，不应据此判断设备安全。",
+                RsWarningLevel.Error,
+            )
         }
 
         Spacer(Modifier.height(16.dp))
-        SmallTitle("实时发现")
+        RsSectionTitle("实时发现")
         Spacer(Modifier.height(4.dp))
-
         if (scan.live.isEmpty()) {
-            Text(
+            RsText(
                 if (scan.scanning) "扫描中…" else "本次没有命中项",
-                fontSize = 13.sp,
-                color = c.onBackgroundVariant,
+                RsTextStyle.Label,
                 modifier = Modifier.padding(vertical = 8.dp),
             )
         } else {
@@ -465,22 +271,21 @@ fun ScanPage(scan: ScanState, onRescan: () -> Unit, onCancel: () -> Unit) {
                 Column(Modifier.fillMaxWidth()) {
                     val items = scan.live.take(10)
                     items.forEachIndexed { idx, it ->
-                        if (idx > 0) ThinDivider(indent = false)
+                        if (idx > 0) RsDivider()
                         Row(
                             Modifier.fillMaxWidth().height(52.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Box(
                                 Modifier
-                                    .width(8.dp)
-                                    .height(8.dp)
+                                    .size(8.dp)
                                     .clip(RoundedCornerShape(4.dp))
                                     .background(severityColor(it.severity)),
                             )
                             Spacer(Modifier.width(12.dp))
                             Column(Modifier.weight(1f)) {
-                                Text(it.title, fontSize = 14.sp, color = c.onBackground)
-                                Text(it.id, fontSize = 11.sp, color = c.onBackgroundVariant)
+                                RsText(it.title, RsTextStyle.BodyS)
+                                RsText(it.id, RsTextStyle.Caption)
                             }
                         }
                     }
@@ -488,17 +293,13 @@ fun ScanPage(scan: ScanState, onRescan: () -> Unit, onCancel: () -> Unit) {
             }
         }
 
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(20.dp))
         if (scan.scanning) {
-            GlassButton(onClick = { onCancel() }, modifier = Modifier.fillMaxWidth()) {
-                Text("取消扫描", fontSize = 16.sp)
-            }
+            RsButton("取消扫描", onClick = onCancel, modifier = Modifier.fillMaxWidth())
         } else {
-            GlassButton(onClick = { onRescan() }, modifier = Modifier.fillMaxWidth()) {
-                Text("重新检测", fontSize = 16.sp)
-            }
+            RsButton("重新检测", onClick = onRescan, modifier = Modifier.fillMaxWidth())
         }
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(8.dp))
     }
 }
 
@@ -510,20 +311,22 @@ fun ReportPage(
     onRescan: () -> Unit,
     onDetail: (Evidence) -> Unit,
 ) {
-    val c = MiuixTheme.colorScheme
+    val p = LocalRsPalette.current
     val ctx = LocalContext.current
     val exportScope = rememberCoroutineScope()
 
     if (result == null) {
         PageScroll {
-            Spacer(Modifier.height(24.dp))
-            Text("还没有报告", fontSize = 17.sp, fontWeight = FontWeight.Medium, color = c.onBackground)
-            Spacer(Modifier.height(6.dp))
-            Text("先完成一次扫描", fontSize = 13.sp, color = c.onBackgroundVariant)
-            Spacer(Modifier.height(24.dp))
-            GlassButton(onClick = { onRescan() }, modifier = Modifier.fillMaxWidth()) {
-                Text("开始检测", fontSize = 16.sp)
+            Spacer(Modifier.height(12.dp))
+            RsCard {
+                Column {
+                    RsText("还没有报告", RsTextStyle.TitleM)
+                    Spacer(Modifier.height(6.dp))
+                    RsText("先完成一次扫描，这里会显示结论与全部证据。", RsTextStyle.Label)
+                }
             }
+            Spacer(Modifier.height(16.dp))
+            RsButton("开始检测", onClick = onRescan, modifier = Modifier.fillMaxWidth())
         }
         return
     }
@@ -532,95 +335,73 @@ fun ReportPage(
     val hits = result.items.filter { it.verdict == Verdict.HIT }
 
     PageScroll {
-        Spacer(Modifier.height(4.dp))
-
-        RsCard {
-            Row(
-                Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text("结论", fontSize = 13.sp, color = c.onBackgroundVariant)
+        // 结论卡
+        RsCard(containerColor = gradeColor(s.grade)) {
+            Column(Modifier.fillMaxWidth()) {
+                RsText("结论", RsTextStyle.Caption, color = Color.White.copy(alpha = 0.85f))
+                Spacer(Modifier.height(4.dp))
+                RsText(s.grade.label, RsTextStyle.TitleL, color = Color.White)
+                Spacer(Modifier.height(4.dp))
+                RsText(
+                    "ROOT ${String.format("%.1f", s.rootScore)} · 置信度 ${s.confidence.name}",
+                    RsTextStyle.BodyS,
+                    color = Color.White.copy(alpha = 0.85f),
+                )
+                if (s.grade == Grade.INCOMPLETE) {
                     Spacer(Modifier.height(6.dp))
-                    Text(
-                        s.grade.label,
-                        fontSize = 26.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = gradeColor(s.grade),
-                    )
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        "ROOT ${String.format("%.1f", s.rootScore)}   ·   置信度 ${s.confidence.name}",
-                        fontSize = 12.sp,
-                        color = c.onBackgroundVariant,
-                    )
-                    if (s.grade == Grade.INCOMPLETE) {
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            "检测面不完整，本次不给出「干净」结论",
-                            fontSize = 12.sp,
-                            color = Color(0xFFFF9500),
-                        )
-                    }
-                }
-                Spacer(Modifier.width(12.dp))
-                HeroGauge(
-                    fraction = (s.rootScore / 100.0).toFloat(),
-                    color = gradeColor(s.grade),
-                    size = 86.dp,
-                    strokeWidth = 7.dp,
-                ) {
-                    AnimatedNumber(
-                        value = s.rootScore,
-                        fontSize = 19.sp,
-                        color = gradeColor(s.grade),
+                    RsText(
+                        "检测面不完整，本次不给出「干净」结论",
+                        RsTextStyle.BodyS,
+                        color = Color.White,
                     )
                 }
             }
         }
 
         Spacer(Modifier.height(16.dp))
-        SmallTitle("维度得分")
-        RsCard {
+        RsSectionTitle("维度得分")
+        RsCard(insideMargin = RowCardMargin) {
             Column {
                 RowKV("Root 状态", String.format("%.1f", s.rootScore))
-                ThinDivider(indent = false)
+                RsDivider()
                 RowKV("系统完整性", String.format("%.1f", s.integrityScore))
-                ThinDivider(indent = false)
+                RsDivider()
+                RowKV("挂钩与注入", String.format("%.1f", s.hookScore))
+                RsDivider()
                 RowKV("运行环境", String.format("%.1f", s.environmentScore))
             }
         }
 
         Spacer(Modifier.height(16.dp))
-        SmallTitle("检测完整性")
-        RsCard {
+        RsSectionTitle("检测完整性")
+        RsCard(insideMargin = RowCardMargin) {
             Column {
                 val errored = result.items.count {
                     it.effectiveState == EvidenceState.ERROR || it.effectiveState == EvidenceState.TIMEOUT
                 }
                 RowKV("可读率", "${(s.coverage * 100).toInt()}%")
-                ThinDivider(indent = false)
+                RsDivider()
                 RowKV("证据条目", "${result.items.size}")
-                ThinDivider(indent = false)
+                RsDivider()
                 RowKV("命中", "${s.hitCount}")
-                ThinDivider(indent = false)
+                RsDivider()
                 RowKV("UNKNOWN", "${s.unknownCount}")
-                ThinDivider(indent = false)
-                RowKV("执行失败", "$errored", if (errored > 0) Color(0xFFFF3B30) else null)
+                RsDivider()
+                RowKV("执行失败", "$errored", if (errored > 0) RsStatusColors.Danger else null)
             }
         }
 
         if (hits.isNotEmpty()) {
             Spacer(Modifier.height(16.dp))
-            SmallTitle("风险分布")
+            RsSectionTitle("风险分布")
             RsCard {
                 Column {
                     val max = hits.size.coerceAtLeast(1)
                     val list = listOf(
-                        "CRITICAL" to Color(0xFFFF3B30),
-                        "HIGH" to Color(0xFFFF9500),
-                        "MEDIUM" to Color(0xFFFFCC00),
-                        "LOW" to c.onBackgroundVariant,
+                        "CRITICAL" to RsStatusColors.Danger,
+                        "HIGH" to RsStatusColors.Warning,
+                        "MEDIUM" to RsStatusColors.Medium,
+                        "LOW" to p.onVariant,
                     )
                     list.forEach { (sev, color) ->
                         val n = hits.count { it.severity.name == sev }
@@ -629,8 +410,14 @@ fun ReportPage(
                                 Modifier.fillMaxWidth().height(34.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Text(sev, fontSize = 12.sp, color = c.onBackgroundVariant, modifier = Modifier.width(72.dp))
-                                Box(Modifier.weight(1f).height(5.dp).clip(RoundedCornerShape(3.dp)).background(c.onBackground.copy(alpha = 0.08f))) {
+                                RsText(sev, RsTextStyle.Caption, modifier = Modifier.width(72.dp))
+                                Box(
+                                    Modifier
+                                        .weight(1f)
+                                        .height(5.dp)
+                                        .clip(RoundedCornerShape(3.dp))
+                                        .background(p.onBackground.copy(alpha = 0.08f)),
+                                ) {
                                     Box(
                                         Modifier
                                             .fillMaxHeight()
@@ -640,7 +427,7 @@ fun ReportPage(
                                     )
                                 }
                                 Spacer(Modifier.width(10.dp))
-                                Text("$n", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = c.onBackground)
+                                RsText("$n", RsTextStyle.BodyS, fontWeight = FontWeight.Medium)
                             }
                         }
                     }
@@ -648,8 +435,8 @@ fun ReportPage(
             }
 
             Spacer(Modifier.height(16.dp))
-            SmallTitle("高风险项目")
-            RsCard {
+            RsSectionTitle("高风险项目")
+            RsCard(insideMargin = RowCardMargin) {
                 Column(Modifier.fillMaxWidth()) {
                     val top = hits
                         .sortedWith(
@@ -658,7 +445,7 @@ fun ReportPage(
                         )
                         .take(10)
                     top.forEachIndexed { idx, e ->
-                        if (idx > 0) ThinDivider(indent = false)
+                        if (idx > 0) RsDivider()
                         Row(
                             Modifier
                                 .fillMaxWidth()
@@ -668,66 +455,49 @@ fun ReportPage(
                         ) {
                             Box(
                                 Modifier
-                                    .width(8.dp)
-                                    .height(8.dp)
+                                    .size(8.dp)
                                     .clip(RoundedCornerShape(4.dp))
                                     .background(severityColor(e.severity.name)),
                             )
                             Spacer(Modifier.width(12.dp))
                             Column(Modifier.weight(1f)) {
-                                Text(e.title, fontSize = 14.sp, color = c.onBackground)
-                                Text(e.id, fontSize = 11.sp, color = c.onBackgroundVariant)
+                                RsText(e.title, RsTextStyle.BodyS)
+                                RsText(e.id, RsTextStyle.Caption)
                             }
-                            Text("›", fontSize = 18.sp, color = c.onBackgroundVariant)
+                            RsText("›", RsTextStyle.TitleM, color = p.onVariant)
                         }
                     }
                 }
             }
             if (hits.size > 10) {
                 Spacer(Modifier.height(8.dp))
-                Text(
-                    "另有 ${hits.size - 10} 项命中未列出",
-                    fontSize = 12.sp,
-                    color = c.onBackgroundVariant,
-                )
+                RsText("另有 ${hits.size - 10} 项命中未列出", RsTextStyle.Caption)
             }
         }
 
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(20.dp))
         Row(Modifier.fillMaxWidth()) {
-            GlassButton(onClick = { onRescan() }, modifier = Modifier.weight(1f)) {
-                Text("重新扫描", fontSize = 15.sp)
-            }
+            RsButton("重新扫描", onClick = onRescan, modifier = Modifier.weight(1f))
             Spacer(Modifier.width(12.dp))
-            GlassButton(
-                // v2.22.44（P2-08）：导出不在点击回调（主线程）里
-                // 同步执行，改走 IO 协程。
+            RsButton(
+                "导出 JSON",
+                // 导出走 IO 协程 + Toast 反馈（沿用既有实现与注释口径）
                 onClick = {
-                    // v2.22.45（审查 B P3-02）：以前导出结果被直接丢弃，
-                    // 成功失败用户都无从知道。现在回主线程给 Toast 反馈。
                     exportScope.launch(kotlinx.coroutines.Dispatchers.IO) {
                         val file = JsonExporter.export(ctx, result)
-                        kotlinx.coroutines.withContext(
-                            kotlinx.coroutines.Dispatchers.Main,
-                        ) {
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
                             android.widget.Toast.makeText(
                                 ctx,
-                                if (file != null) {
-                                    "已导出: ${file.name}"
-                                } else {
-                                    "导出失败"
-                                },
+                                if (file != null) "已导出: ${file.name}" else "导出失败",
                                 android.widget.Toast.LENGTH_SHORT,
                             ).show()
                         }
                     }
                 },
                 modifier = Modifier.weight(1f),
-            ) {
-                Text("导出 JSON", fontSize = 15.sp)
-            }
+            )
         }
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(8.dp))
     }
 }
 
@@ -735,51 +505,44 @@ fun ReportPage(
 
 @Composable
 fun DetailPage(item: Evidence?, onBack: () -> Unit) {
-    val c = MiuixTheme.colorScheme
+    val p = LocalRsPalette.current
     if (item == null) {
-        PageScroll { Text("没有选中项", fontSize = 15.sp, color = c.onBackgroundVariant) }
+        PageScroll { RsText("没有选中项", RsTextStyle.Label) }
         return
     }
 
     PageScroll {
+        RsText(item.title, RsTextStyle.TitleL)
         Spacer(Modifier.height(4.dp))
-        Text(
-            "‹ 返回",
-            fontSize = 15.sp,
-            color = c.primary,
-            modifier = Modifier.clickable { onBack() }.padding(vertical = 8.dp),
-        )
-        Spacer(Modifier.height(4.dp))
-        Text(item.title, fontSize = 20.sp, fontWeight = FontWeight.Medium, color = c.onBackground)
-        Spacer(Modifier.height(6.dp))
-        Text(item.id, fontSize = 12.sp, color = c.onBackgroundVariant)
-
+        RsText(item.id, RsTextStyle.Caption)
         Spacer(Modifier.height(12.dp))
         Row {
-            Tag(item.effectiveState.name, if (item.verdict == Verdict.HIT) severityColor(item.severity.name) else c.onBackgroundVariant)
+            RsTag(
+                item.effectiveState.name,
+                if (item.verdict == Verdict.HIT) severityColor(item.severity.name) else p.onVariant,
+            )
             Spacer(Modifier.width(6.dp))
-            Tag(item.severity.label, severityColor(item.severity.name))
+            RsTag(item.severity.label, severityColor(item.severity.name))
             Spacer(Modifier.width(6.dp))
-            Tag("置信度 ${item.confidence.name}", c.onBackgroundVariant)
+            RsTag("置信度 ${item.confidence.name}", p.onVariant)
         }
 
         if (item.detail.isNotEmpty()) {
             Spacer(Modifier.height(16.dp))
-            SmallTitle("风险解释")
-            RsCard { Text(item.detail, fontSize = 14.sp, color = c.onBackground) }
+            RsSectionTitle("风险解释")
+            RsCard { RsText(item.detail, RsTextStyle.BodyS) }
         }
 
         if (item.vectors.isNotEmpty()) {
             Spacer(Modifier.height(16.dp))
-            SmallTitle("原始证据 (${item.vectors.size})")
-            RsCard {
+            RsSectionTitle("原始证据 (${item.vectors.size})")
+            RsCard(insideMargin = RowCardMargin) {
                 Column {
                     item.vectors.take(16).forEachIndexed { idx, v ->
-                        if (idx > 0) ThinDivider(indent = false)
-                        Text(
+                        if (idx > 0) RsDivider()
+                        RsText(
                             v,
-                            fontSize = 12.sp,
-                            color = c.onBackgroundVariant,
+                            RsTextStyle.Caption,
                             modifier = Modifier.padding(vertical = 8.dp),
                         )
                     }
@@ -788,41 +551,26 @@ fun DetailPage(item: Evidence?, onBack: () -> Unit) {
         }
 
         Spacer(Modifier.height(16.dp))
-        SmallTitle("检测来源")
-        RsCard {
+        RsSectionTitle("检测来源")
+        RsCard(insideMargin = RowCardMargin) {
             Column {
                 RowKV("类别", "${item.category.code} · ${item.category.label}")
-                ThinDivider(indent = false)
+                RsDivider()
                 RowKV("权重", "${item.severity.weight}")
-                ThinDivider(indent = false)
+                RsDivider()
                 RowKV("维度", com.rootsentinel.model.ScoringModel.dimensionOf(item).label)
-                ThinDivider(indent = false)
+                RsDivider()
                 RowKV("启发式", if (item.heuristic) "是（×0.35）" else "否")
             }
         }
 
         if (item.fpNote.isNotEmpty()) {
             Spacer(Modifier.height(16.dp))
-            SmallTitle("误报说明")
+            RsSectionTitle("误报说明")
             RsCard {
-                Text(item.fpNote, fontSize = 13.sp, color = c.onBackgroundVariant)
+                RsText(item.fpNote, RsTextStyle.BodyS, color = p.onVariant)
             }
         }
-
-        Spacer(Modifier.height(24.dp))
-    }
-}
-
-/** 小标签（胶囊） */
-@Composable
-fun Tag(text: String, color: Color) {
-    Box(
-        Modifier
-            .clip(RoundedCornerShape(11.dp))
-            .background(color.copy(alpha = 0.12f))
-            .padding(horizontal = 9.dp, vertical = 4.dp),
-    ) {
-        // 胶囊里的文字不允许换行，否则窄宽度下会被压成两行、看起来像被遮挡
-        Text(text, fontSize = 11.sp, color = color, maxLines = 1, softWrap = false)
+        Spacer(Modifier.height(8.dp))
     }
 }

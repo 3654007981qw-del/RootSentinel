@@ -428,12 +428,11 @@ private fun DialogTitle(text: String) {
 
 @Composable
 private fun PrimaryButton(text: String, onClick: () -> Unit) {
-    GlassButton(
+    RsButton(
+        text = text,
         onClick = onClick,
         modifier = Modifier.fillMaxWidth().padding(bottom = 2.dp),
-    ) {
-        Text(text, fontSize = 15.sp)
-    }
+    )
 }
 
 @Composable

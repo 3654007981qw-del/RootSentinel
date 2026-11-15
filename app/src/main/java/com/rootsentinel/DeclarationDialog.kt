@@ -70,12 +70,11 @@ fun DeclarationDialog(onConfirm: () -> Unit) {
                     color = c.onBackgroundVariant,
                 )
                 Spacer(Modifier.height(16.dp))
-                GlassButton(
+                RsButton(
+                    text = "我已阅读，继续使用",
                     onClick = onConfirm,
                     modifier = Modifier.fillMaxWidth().padding(bottom = 2.dp),
-                ) {
-                    Text("我已阅读，继续使用", fontSize = 15.sp)
-                }
+                )
             }
         }
     }
