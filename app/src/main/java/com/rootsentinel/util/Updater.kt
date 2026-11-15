@@ -573,16 +573,41 @@ object Updater {
         var redirects = 0
         while (true) {
             val conn = openGet(url)
+            // v2.22.53（第八轮审查 P3-03 残留项）：本连接的整个使用
+            // 周期包在 try/finally 里，非 200、读流异常等一切退出路
+            // 径都 disconnect，不再只靠正常路径关流。
+            try {
+                return downloadSingleBody(info, conn, dest, onProgress, isCancelled) { loc ->
+                    url = loc
+                }
+            } catch (e: RedirectSignal) {
+                if (++redirects > 5) throw IllegalStateException("下载重定向异常")
+            } finally {
+                conn.disconnect()
+            }
+        }
+    }
+
+    /** 重定向内部信号：把 Location 交回 [downloadSingleFrom] 换地址重连。 */
+    private class RedirectSignal : Exception()
+
+    private fun downloadSingleBody(
+        info: UpdateInfo,
+        conn: HttpURLConnection,
+        dest: File,
+        onProgress: (Long, Long) -> Unit,
+        isCancelled: () -> Boolean,
+        onRedirect: (String) -> Unit,
+    ): String {
             conn.instanceFollowRedirects = false
             val code = conn.responseCode
             if (code in intArrayOf(301, 302, 303, 307, 308)) {
                 val loc = conn.getHeaderField("Location")
-                conn.disconnect()
-                if (loc.isNullOrEmpty() || ++redirects > 5) {
+                if (loc.isNullOrEmpty()) {
                     throw IllegalStateException("下载重定向异常")
                 }
-                url = loc
-                continue
+                onRedirect(loc)
+                throw RedirectSignal()
             }
             if (code != 200) throw IllegalStateException("下载失败（HTTP $code）")
             val total = if (conn.contentLengthLong > 0) {
@@ -620,7 +645,6 @@ object Updater {
                 }
             }
             return digest.digest().joinToString("") { "%02x".format(it) }
-        }
     }
 
     sealed interface VerifyResult {

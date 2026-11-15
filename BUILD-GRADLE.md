@@ -49,6 +49,13 @@ Gradle 就会优先用这个本地 artifact。
 
 ## 四、构建
 
+> **发布路径说明（v2.22.53 对齐，第八轮审查 P2-02）**：正式发布
+> 只走 `tools/manual-build/` 的手工管线——它自 v2.22.53 起在
+> dex 阶段执行 R8（混淆 + 收缩 + Log.d/Log.v 剥离），与本文件
+> 此前描述的 Gradle release 构建是两条路。下文的 Gradle
+> `assembleRelease` 仅供本地验证，不要拿它的产物对外发布，
+> 以免出现两个构建来源的包互相覆盖更新。
+
 ```sh
 # 1. 一次性准备（arm64 主机才需要）
 sh setup-aapt2.sh

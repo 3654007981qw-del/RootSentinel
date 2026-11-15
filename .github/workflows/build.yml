@@ -27,3 +27,56 @@ jobs:
 
       - name: Assemble debug
         run: ./gradlew :app:assembleDebug
+
+  native:
+    # v2.22.53（第八轮审查 P3-02）：此前 CI 只有上面的 Gradle job，
+    # 用的是仓库内预编译 jniLibs——C++ 源码改坏、或 jniLibs 落后于
+    # cpp/src，CI 都发现不了。本 job 用固定版本 NDK 真实编译三
+    # ABI，并核对每个产物的 ELF 机器类型与 LOAD 对齐（64 位需
+    # 16 KB 页对齐，arm32 为 4 KB）。签名指纹是已发布 APK 里可读
+    # 的公开值，注入它只为让 I.APK_SIGNATURE 基线与本地构建一致。
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK + CMake
+        run: sdkmanager "ndk;27.2.12479018" "cmake;3.22.1"
+
+      - name: Build native (3 ABIs)
+        run: |
+          NDK=$ANDROID_SDK_ROOT/ndk/27.2.12479018
+          CMAKE=$ANDROID_SDK_ROOT/cmake/3.22.1/bin/cmake
+          NINJA=$ANDROID_SDK_ROOT/cmake/3.22.1/bin/ninja
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            extra=""
+            if [ "$abi" = "armeabi-v7a" ]; then extra="-DANDROID_ARM_MODE=arm"; fi
+            $CMAKE -S app/src/main/cpp -B build-native/$abi \
+              -DCMAKE_TOOLCHAIN_FILE=$NDK/build/cmake/android.toolchain.cmake \
+              -DANDROID_ABI=$abi -DANDROID_PLATFORM=android-26 $extra \
+              -DRS_SIGNER_SHA256=06377C87CB33D9AB1B0BAE330135AB67404AB96DEEA9F3584DDF2B2FFCDC7A06 \
+              -DCMAKE_BUILD_TYPE=Release -DCMAKE_MAKE_PROGRAM=$NINJA -G Ninja
+            $CMAKE --build build-native/$abi -j2
+            test -s build-native/$abi/librootsentinel.so
+          done
+
+      - name: Verify ELF machine + LOAD alignment
+        run: |
+          check() {
+            readelf -h build-native/$1/librootsentinel.so | grep -q "Machine:.*$2"
+            align=$(readelf -lW build-native/$1/librootsentinel.so | awk '/LOAD/{print $NF; exit}')
+            if [ "$align" != "$3" ]; then
+              echo "$1 LOAD align $align != $3"; exit 1
+            fi
+          }
+          check arm64-v8a AArch64 0x4000
+          check armeabi-v7a ARM 0x1000
+          check x86_64 X86-64 0x4000

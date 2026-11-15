@@ -22,8 +22,11 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  * 关闭。弹窗不可点外部/返回键关闭——必须读完并点按钮，避免
  * 「没看见就同意了」。确认状态存 SettingsStore.declarationSeen。
  *
- * 文案与 Telemetry.buildPayload 的实际字段严格对应：
- * 文案承诺不传的，代码里就不许出现；改字段先改这里。
+ * 文案与 Telemetry.buildPayload 的实际字段逐项对应（v2.22.53，
+ * 第八轮审查 P3-01 后对齐：此前文案只列了部分字段，制造商、
+ * 分项分数、逐项类别/严重度/置信度/启发式标记、计数、耗时、
+ * 时间戳都没写）。纪律不变：文案承诺不传的，代码里就不许
+ * 出现；改字段先改这里的文案。
  */
 @Composable
 fun DeclarationDialog(onConfirm: () -> Unit) {
@@ -50,7 +53,7 @@ fun DeclarationDialog(onConfirm: () -> Unit) {
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "为改良检测准确率，继续使用即表示您同意：每次扫描完成后，本应用上传一份诊断摘要，包括应用版本、设备品牌/型号、Android 版本、检测评分与覆盖率，以及各检测项的编号与判定结果。",
+                    "为改良检测准确率，继续使用即表示您同意：每次扫描完成后，本应用上传一份诊断摘要，包括：应用版本与版本号；设备品牌、型号、制造商与 Android 版本；检测总评级与四项分项评分（Root、完整性、Hook、环境）、总体置信度与覆盖率；命中数、未知数、检测项总数与本次检测耗时；每条检测结果的编号、类别、严重度、置信度、判定与启发式标记；以及上报时间戳。",
                     fontSize = 13.sp,
                     color = c.onBackgroundVariant,
                 )

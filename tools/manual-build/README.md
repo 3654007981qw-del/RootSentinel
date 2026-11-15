@@ -1,9 +1,16 @@
 # 手工发布管线（维护者构建脚本）
 
 发布 APK 不走 Gradle，而是这套手工管线（aapt2 / kotlinc / CMake /
-d8 / zipalign / apksigner 分阶段执行）。本目录是维护者机器上实际
-使用的脚本快照，自 v2.22.50 起随源码入仓——第六轮审查指出此前
-管线只存在于维护者本地，源码包无法证明版本生成流程已交付。
+zipalign / apksigner 分阶段执行；dex 阶段 release 走 R8 混淆收缩、
+debug 走 D8 不混淆——v2.22.53 起，第八轮审查 P2-02）。本目录是
+维护者机器上实际使用的脚本快照，自 v2.22.50 起随源码入仓——
+第六轮审查指出此前管线只存在于维护者本地，源码包无法证明版本
+生成流程已交付。
+
+R8 规则栈：aapt2 按清单生成的组件 keep（构建时产出）+ 项目
+`app/proguard-rules.pro` + 全部 AAR consumer rules + 本目录的
+`r8-extra.pro`。R8 的 mapping 文件只保留在维护者本地，不随
+发布公开（公开等于自废混淆）。
 
 - `build_apk.sh` —— 主管线。`VNAME`/`VCODE` 是**版本单一事实源**：
   prep 阶段据此生成 `Version.kt`、`CMakeLists.txt` 的 `RS_VERSION`

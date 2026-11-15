@@ -3,6 +3,7 @@
 
 #include <cerrno>
 #include <chrono>
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -249,9 +250,21 @@ std::vector<DirEntry> listDirRaw(const std::string& path) {
 
         long off = 0;
         while (off < n) {
+            // v2.22.53（第八轮审查 P2-05）：getdents64 的返回数据在
+            // 被 Hook/篡改的环境里不可信——本应用的检测对象正是这
+            // 类环境。此前只查 d_reclen==0，异常记录可致越界读。
+            // 现在逐条验边界：剩余字节须容得下固定头部+至少 1 字
+            // 节名字；d_reclen 须落在 [头部+1, 剩余字节] 内；名字
+            // 用 strnlen 按记录内可用长度截断。任一不满足即停止
+            // 解析本批（已收条目保留），不越界、不崩溃。
+            const long remain = n - off;
+            constexpr long kHeader = (long)offsetof(LinuxDirent64, d_name);
+            if (remain < kHeader + 1) break;
             auto* d = (LinuxDirent64*)(buf.data() + off);
-            if (d->d_reclen == 0) break;
-            std::string name(d->d_name);
+            if (d->d_reclen < kHeader + 1 || (long)d->d_reclen > remain) break;
+            const size_t maxName = (size_t)((long)d->d_reclen - kHeader);
+            const size_t nameLen = strnlen(d->d_name, maxName);
+            std::string name(d->d_name, nameLen);
             if (name != "." && name != "..") {
                 out.push_back(DirEntry{name, d->d_type});
             }

@@ -32,10 +32,18 @@ class ArtDeepDetector(private val context: Context) {
     // ------------------------------------------------------------ E.JAVA_STACK
     private fun javaStack(): Evidence {
         val frames = Thread.currentThread().stackTrace
+        // v2.22.53（第八轮审查 P2-02 配套）：自家包前缀不能写死
+        // "com.rootsentinel."——release 走 R8 后类名/包名会被改写，
+        // 写死的前缀匹配不上自家帧，会把自己的调用栈误报成外部
+        // 帧（假 HIT）。改为运行时按本类实际全名前两段推导：R8
+        // 的包名映射是逐段一致的，未混淆时推导结果恰为
+        // "com.rootsentinel."，行为与从前一致。
+        val ownRoot = ArtDeepDetector::class.java.name
+            .split('.').take(2).joinToString(".") + "."
         val allowed = listOf(
             "java.", "javax.", "android.", "androidx.", "kotlin.", "kotlinx.",
             "com.android.", "dalvik.", "sun.", "libcore.", "org.apache.",
-            "org.json.", "org.xmlpull.", "com.rootsentinel.",
+            "org.json.", "org.xmlpull.", ownRoot,
         )
 
         val bad = frames.mapNotNull { f ->

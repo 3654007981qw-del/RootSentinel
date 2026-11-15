@@ -1,0 +1,12 @@
+# 手工管线 R8 附加规则（AGP 默认行为的等价物 + 本应用组件全保留）
+-keepattributes Signature,*Annotation*,InnerClasses,EnclosingMethod,Exceptions,RuntimeVisibleAnnotations,RuntimeVisibleParameterAnnotations,AnnotationDefault
+-keep class com.rootsentinel.MainActivity { *; }
+-keep class com.rootsentinel.RootSentinelApp { *; }
+-keep class com.rootsentinel.engine.ProbeService { *; }
+-keep class * extends android.app.Activity { <init>(); }
+-keep class * extends android.app.Service { <init>(); }
+-keep class * extends android.app.Application { <init>(); }
+-keep class * extends android.content.BroadcastReceiver { <init>(); }
+-keep class * extends android.content.ContentProvider { <init>(); }
+-keep class * implements android.os.Parcelable { public static final android.os.Parcelable$Creator *; }
+-dontwarn **
