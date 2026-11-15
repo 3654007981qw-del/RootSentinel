@@ -144,4 +144,62 @@ class UpdaterTest {
         assertEquals(4, big.size)
         assertEquals(16_233_585L, big.last().last)
     }
+
+    // ---- v2.22.55 测速选源与速度显示 ----
+
+    @Test
+    fun speedMeterNeedsHalfSecondSpan() {
+        val m = Updater.SpeedMeter()
+        assertEquals(0L, m.add(0, 0))
+        // 跨度不足 500ms：读数无意义，返回 0
+        assertEquals(0L, m.add(200, 100_000))
+    }
+
+    @Test
+    fun speedMeterReportsWindowRate() {
+        val m = Updater.SpeedMeter(windowMs = 3_000)
+        m.add(0, 0)
+        // 2 秒下了 2 MB → 约 1 MB/s
+        val v = m.add(2_000, 2_000_000)
+        assertTrue(v in 900_000..1_100_000)
+    }
+
+    @Test
+    fun speedMeterWindowSlides() {
+        val m = Updater.SpeedMeter(windowMs = 3_000)
+        m.add(0, 0)
+        m.add(1_000, 3_000_000) // 前 1 秒很快
+        // 之后停滞到 5 秒：窗口只剩近 3 秒，速度应明显低于全程平均
+        val v = m.add(5_000, 3_100_000)
+        assertTrue(v < 200_000)
+    }
+
+    @Test
+    fun rankBySpeedOrdersFastestFirst() {
+        val urls = listOf("gh", "m1", "m2", "gt")
+        val ranked = Updater.rankBySpeed(
+            urls,
+            mapOf("m2" to 5_000_000L, "gh" to 10_000L, "gt" to 2_000_000L),
+        )
+        // 实测最快在前；没测到的 m1 沉底但不消失
+        assertEquals(listOf("m2", "gt", "gh", "m1"), ranked)
+    }
+
+    @Test
+    fun rankBySpeedStableForTiesAndMissing() {
+        val urls = listOf("a", "b", "c")
+        assertEquals(urls, Updater.rankBySpeed(urls, emptyMap()))
+        assertEquals(
+            urls,
+            Updater.rankBySpeed(urls, mapOf("a" to 7L, "b" to 7L, "c" to 7L)),
+        )
+    }
+
+    @Test
+    fun formatSpeedUnits() {
+        assertEquals("—", Updater.formatSpeed(0))
+        assertEquals("512 B/s", Updater.formatSpeed(512))
+        assertEquals("256 KB/s", Updater.formatSpeed(256 * 1024))
+        assertEquals("1.5 MB/s", Updater.formatSpeed(1536 * 1024))
+    }
 }

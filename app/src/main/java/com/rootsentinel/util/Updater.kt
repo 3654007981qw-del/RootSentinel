@@ -59,11 +59,13 @@ object Updater {
         val sha256: String?,
         val source: String,
         /**
-         * 全部候选下载地址（v2.22.52 多源切换）：顺序为 GitHub 直连
-         * → 公益镜像 ×3 → Gitee。下载引擎逐个尝试、自动切换；
-         * apkUrl 恒为第一个候选（官方直链），供展示与复制/浏览器
-         * 兜底使用。候选指向的都是同一个文件，最终完整性由安装前
-         * 的 SHA-256/包名/签名三重校验保证，镜像只能影响速度。
+         * 全部候选下载地址（v2.22.52 多源切换）：初始顺序为 GitHub
+         * 直连 → 公益镜像 ×3 → Gitee；v2.22.55 起下载前先并行测速，
+         * 按实测吞吐重排（见 probeAndRank），此顺序只作测速前的
+         * 初始偏好与同速时的稳定次序。apkUrl 恒为第一个候选（官方
+         * 直链），供展示与复制/浏览器兜底使用。候选指向的都是同一
+         * 个文件，最终完整性由安装前的 SHA-256/包名/签名三重校验
+         * 保证，镜像只能影响速度。
          */
         val candidates: List<String> = listOf(apkUrl),
     )
@@ -109,6 +111,53 @@ object Updater {
         }
         return out
     }
+
+    /**
+     * 下载速度计（纯逻辑，时间由调用方注入，可单测）：滑动窗口内
+     * 的平均速度（字节/秒）。窗口默认 3 秒；窗口内样本跨度不足
+     * 500ms 时返回 0（读数还没意义，避免开局爆表）。
+     */
+    class SpeedMeter(private val windowMs: Long = 3_000) {
+        private val samples = ArrayDeque<LongArray>() // [timeMs, totalBytes]
+
+        @Synchronized
+        fun add(nowMs: Long, totalBytes: Long): Long {
+            samples.addLast(longArrayOf(nowMs, totalBytes))
+            while (samples.size > 2 && nowMs - samples.first()[0] > windowMs) {
+                samples.removeFirst()
+            }
+            val first = samples.first()
+            val span = nowMs - first[0]
+            if (span < 500) return 0
+            val bytes = totalBytes - first[1]
+            if (bytes <= 0) return 0
+            return bytes * 1000 / span
+        }
+
+        @Synchronized
+        fun reset() = samples.clear()
+    }
+
+    /** 速度读数格式化（纯函数，可单测）。 */
+    fun formatSpeed(bps: Long): String = when {
+        bps >= 1024 * 1024 -> "%.1f MB/s".format(bps / 1048576.0)
+        bps >= 1024 -> "%.0f KB/s".format(bps / 1024.0)
+        bps > 0 -> "$bps B/s"
+        else -> "—"
+    }
+
+    /**
+     * 按实测速度给候选源排序（纯函数，可单测）：速度高者在前；
+     * 没有读数的（探测失败/未测）沉底，且彼此保持原顺序——它们
+     * 仍是可用的兜底，只是优先级最低。
+     */
+    fun rankBySpeed(urls: List<String>, speeds: Map<String, Long>): List<String> =
+        urls.withIndex()
+            .sortedWith(
+                compareByDescending<IndexedValue<String>> { speeds[it.value] ?: -1L }
+                    .thenBy { it.index },
+            )
+            .map { it.value }
 
     /** 三段式版本号数值比较：remote > current 才算新版。解析失败按不新处理。 */
     fun isNewer(remote: String, current: String): Boolean {
@@ -256,10 +305,14 @@ object Updater {
         }
     }
 
-    private fun openGet(url: String, shortTimeout: Boolean = false): HttpURLConnection {
+    private fun openGet(
+        url: String,
+        shortTimeout: Boolean = false,
+        timeoutMs: Int? = null,
+    ): HttpURLConnection {
         val conn = URL(url).openConnection() as HttpURLConnection
-        conn.connectTimeout = if (shortTimeout) 5_000 else 10_000
-        conn.readTimeout = if (shortTimeout) 5_000 else 15_000
+        conn.connectTimeout = timeoutMs ?: if (shortTimeout) 5_000 else 10_000
+        conn.readTimeout = timeoutMs ?: if (shortTimeout) 5_000 else 15_000
         conn.setRequestProperty("User-Agent", "RootSentinel/${RootSentinelVersion.NAME}")
         conn.setRequestProperty("Accept", "application/json")
         return conn
@@ -268,8 +321,8 @@ object Updater {
     /**
      * 下载 APK 到 dest（v2.22.52 多源 + 分片续传）。阻塞调用，走 IO 线程。
      *
-     * 流程：候选源（GitHub 直连 → 镜像 → Gitee）任一支持 Range 时
-     * 走分片模式——文件切 4 段并行下载，每段落盘为 part 文件，
+     * 流程：候选源先测速排序（v2.22.55，见 probeAndRank），任一
+     * 支持 Range 时走分片模式——文件切 6 段并行下载，每段落盘为 part 文件，
      * 中断后凭已有 part 长度断点续传；某段在某个源失败自动换下
      * 一个源续下同一段（各源是同一文件，字节区间可跨源拼）。
      * 所有源都不支持 Range 时退回单流模式，同样逐源切换。
@@ -278,28 +331,121 @@ object Updater {
      * 取消时保留 part 文件，下次重试即续传；dest 只在拼装成功
      * 后出现。
      *
-     * @param onProgress (已下载字节, 总字节)；总字节未知时为 -1
+     * @param onProgress (已下载字节, 总字节, 当前速度字节/秒)；
+     * 总字节未知时为 -1
      * @param isCancelled 返回 true 时中止（分片保留）
      * @return 实际文件的 SHA-256（hex 小写）
      */
     fun download(
         info: UpdateInfo,
         dest: File,
-        onProgress: (Long, Long) -> Unit,
+        onProgress: (Long, Long, Long) -> Unit,
         isCancelled: () -> Boolean,
     ): String {
         dest.parentFile?.mkdirs()
-        val urls = info.candidates.ifEmpty { listOf(info.apkUrl) }
-        val total = resolveTotal(info, urls)
+        val meter = SpeedMeter()
+        val report = { done: Long, total: Long ->
+            onProgress(done, total, meter.add(System.currentTimeMillis(), done))
+        }
+        val rawUrls = info.candidates.ifEmpty { listOf(info.apkUrl) }
+        val total = resolveTotal(info, rawUrls)
         if (total > MAX_APK_BYTES) {
             throw IllegalStateException("安装包体积异常（$total 字节），已中止下载")
         }
+        // v2.22.55 测速选源：多源且文件不算小时，先并行探测各源的
+        // 实际吞吐再排序——国内网络下 GitHub 直连与各镜像的速度
+        // 差异极大且时时不同，固定顺序必然经常选错源（旧版慢的主
+        // 因）。探测失败的源不剔除，只沉底作兜底。
+        val (urls, preNoRange) =
+            if (rawUrls.size > 1 && (total < 0 || total > 1024 * 1024)) {
+                probeAndRank(rawUrls, total)
+            } else {
+                rawUrls to emptySet()
+            }
         if (total > 0) {
-            val sha = downloadChunked(info, urls, total, dest, onProgress, isCancelled)
+            val sha = downloadChunked(info, urls, total, dest, report, isCancelled, preNoRange)
             if (sha != null) return sha
             // 所有源都不支持分片 → 落单流模式
         }
-        return downloadSingle(info, urls, dest, onProgress, isCancelled)
+        return downloadSingle(info, urls, dest, report, isCancelled)
+    }
+
+    /** 测速探测取样字节数与单源超时（v2.22.55）。 */
+    private const val PROBE_BYTES = 256L * 1024
+    private const val PROBE_TIMEOUT_MS = 4_000
+
+    /**
+     * 并行探测每个候选源的实际吞吐并排序（v2.22.55）。
+     * 返回（排序后的地址表，探测中确认不支持 Range 的源集合）。
+     */
+    private fun probeAndRank(
+        urls: List<String>,
+        total: Long,
+    ): Pair<List<String>, Set<String>> {
+        val speeds = java.util.concurrent.ConcurrentHashMap<String, Long>()
+        val noRange = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+        // 从文件三分之一处取样，避开各源对开头区间的缓存差异
+        val start = if (total > PROBE_BYTES * 4) total / 3 else 0L
+        val end = if (total > 0) {
+            minOf(start + PROBE_BYTES - 1, total - 1)
+        } else {
+            PROBE_BYTES - 1
+        }
+        val pool = Executors.newFixedThreadPool(urls.size.coerceIn(1, 6))
+        try {
+            val futures = urls.map { u ->
+                pool.submit<Unit> {
+                    val sp = probeOne(u, start, end, noRange)
+                    if (sp > 0) speeds[u] = sp
+                }
+            }
+            futures.forEach {
+                runCatching { it.get(10, java.util.concurrent.TimeUnit.SECONDS) }
+            }
+        } finally {
+            pool.shutdownNow()
+        }
+        return rankBySpeed(urls, speeds) to noRange
+    }
+
+    /** 单源探测：读满取样量或超时为止，返回字节/秒（失败为 0）。 */
+    private fun probeOne(
+        url: String,
+        start: Long,
+        end: Long,
+        noRange: MutableSet<String>,
+    ): Long {
+        val conn = when (val r = openRange(url, start, end, PROBE_TIMEOUT_MS)) {
+            is RangeResult.Part -> r.conn
+            is RangeResult.Full -> {
+                noRange.add(url)
+                r.conn
+            }
+            is RangeResult.Fail -> return 0
+        }
+        val t0 = System.nanoTime()
+        var read = 0L
+        try {
+            conn.inputStream.use { input ->
+                val buf = ByteArray(32 * 1024)
+                while (read < PROBE_BYTES) {
+                    if ((System.nanoTime() - t0) / 1_000_000 > PROBE_TIMEOUT_MS) break
+                    val n = input.read(
+                        buf, 0,
+                        minOf(buf.size.toLong(), PROBE_BYTES - read).toInt(),
+                    )
+                    if (n < 0) break
+                    read += n
+                }
+            }
+        } catch (e: Exception) {
+            // 读中断不算源死亡，速度按已读部分计
+        } finally {
+            conn.disconnect()
+        }
+        val elapsedMs = (System.nanoTime() - t0) / 1_000_000
+        if (read <= 0 || elapsedMs <= 0) return 0
+        return read * 1000 / elapsedMs
     }
 
     /** 总字节数：接口给的 size 优先；没有就用 Range 探测第一个可用源。 */
@@ -343,12 +489,17 @@ object Updater {
     }
 
     /** 发一个带 Range 的 GET，手动跟随重定向（每次都带 Range 头）。 */
-    private fun openRange(url: String, start: Long, end: Long): RangeResult {
+    private fun openRange(
+        url: String,
+        start: Long,
+        end: Long,
+        timeoutMs: Int? = null,
+    ): RangeResult {
         var current = url
         var redirects = 0
         while (true) {
             val conn = try {
-                openGet(current)
+                openGet(current, timeoutMs = timeoutMs)
             } catch (t: Throwable) {
                 return RangeResult.Fail(-1)
             }
@@ -395,8 +546,10 @@ object Updater {
         dest: File,
         onProgress: (Long, Long) -> Unit,
         isCancelled: () -> Boolean,
+        initialNoRange: Set<String> = emptySet(),
     ): String? {
-        val plan = chunkPlan(total, 4)
+        // v2.22.55：分片数 4 → 6，慢速 CDN 上多连接更容易跑满带宽
+        val plan = chunkPlan(total, 6)
         if (plan.isEmpty()) return null
         val partsDir = File(dest.parentFile, dest.name + ".parts")
         partsDir.mkdirs()
@@ -412,8 +565,10 @@ object Updater {
             }
         }
         onProgress(doneBytes.get(), total)
-        val noRange = java.util.Collections.synchronizedSet(mutableSetOf<String>())
-        val pool = Executors.newFixedThreadPool(plan.size.coerceAtMost(4))
+        val noRange = java.util.Collections.synchronizedSet(
+            mutableSetOf<String>().apply { addAll(initialNoRange) },
+        )
+        val pool = Executors.newFixedThreadPool(plan.size.coerceAtMost(6))
         try {
             val futures = plan.mapIndexed { i, range ->
                 pool.submit<Unit> {
@@ -469,6 +624,18 @@ object Updater {
         return sha
     }
 
+    /**
+     * 慢源淘汰阈值（v2.22.55）：一条连接 5 秒内连 192 KB 都没下到
+     * （约 38 KB/s），视为慢源，断开换下一个源续下同一区间。
+     * 每个分片只在前若干次连接上启用淘汰（见 downloadChunk 的
+     * attempts 预算），避免所有源都慢时来回横跳。
+     */
+    private const val SLOW_WINDOW_MS = 5_000L
+    private const val SLOW_MIN_BYTES = 192L * 1024
+
+    /** 慢源内部信号：当前连接太慢，断开换源。 */
+    private class SlowSourceException : Exception("下载源速度过慢")
+
     /** 下载单个分片：按候选顺序逐源续下同一字节区间。 */
     private fun downloadChunk(
         urls: List<String>,
@@ -487,6 +654,7 @@ object Updater {
             have = 0
         }
         var lastError: Exception? = null
+        var attempts = 0
         while (have < chunkLen) {
             if (isCancelled()) throw InterruptedException("已取消")
             var progressed = false
@@ -495,11 +663,18 @@ object Updater {
                 if (noRange.contains(u)) continue
                 when (val r = openRange(u, range.first + have, range.last)) {
                     is RangeResult.Part -> {
+                        attempts++
+                        // 慢源淘汰只在前 urls.size 次连接启用：每个源
+                        // 都至少被给过一次机会后，就不再横跳，老实
+                        // 在能连的源上慢慢下完。
+                        val evictSlow = attempts <= urls.size
                         try {
                             r.conn.inputStream.use { input ->
                                 RandomAccessFile(part, "rw").use { raf ->
                                     raf.seek(have)
                                     val buf = ByteArray(64 * 1024)
+                                    val connStart = System.currentTimeMillis()
+                                    var connBytes = 0L
                                     while (have < chunkLen) {
                                         if (isCancelled()) {
                                             throw InterruptedException("已取消")
@@ -511,9 +686,17 @@ object Updater {
                                         if (n < 0) break
                                         raf.write(buf, 0, n)
                                         have += n
+                                        connBytes += n
                                         doneBytes.addAndGet(n.toLong())
                                         progressed = true
                                         onProgress(doneBytes.get(), total)
+                                        if (evictSlow &&
+                                            connBytes < SLOW_MIN_BYTES &&
+                                            System.currentTimeMillis() - connStart >=
+                                            SLOW_WINDOW_MS
+                                        ) {
+                                            throw SlowSourceException()
+                                        }
                                     }
                                 }
                             }
@@ -549,9 +732,14 @@ object Updater {
         isCancelled: () -> Boolean,
     ): String {
         var lastError: Exception? = null
-        for (u in urls) {
+        for ((index, u) in urls.withIndex()) {
             try {
-                return downloadSingleFrom(info, u, dest, onProgress, isCancelled)
+                // 慢源淘汰（v2.22.55）：不是最后一个源时才启用，
+                // 最后一个源再慢也让它下完，不做无谓的失败。
+                return downloadSingleFrom(
+                    info, u, dest, onProgress, isCancelled,
+                    evictable = index < urls.lastIndex,
+                )
             } catch (e: InterruptedException) {
                 throw e
             } catch (e: Exception) {
@@ -568,6 +756,7 @@ object Updater {
         dest: File,
         onProgress: (Long, Long) -> Unit,
         isCancelled: () -> Boolean,
+        evictable: Boolean = false,
     ): String {
         var url = startUrl
         var redirects = 0
@@ -577,7 +766,9 @@ object Updater {
             // 周期包在 try/finally 里，非 200、读流异常等一切退出路
             // 径都 disconnect，不再只靠正常路径关流。
             try {
-                return downloadSingleBody(info, conn, dest, onProgress, isCancelled) { loc ->
+                return downloadSingleBody(
+                    info, conn, dest, onProgress, isCancelled, evictable,
+                ) { loc ->
                     url = loc
                 }
             } catch (e: RedirectSignal) {
@@ -597,6 +788,7 @@ object Updater {
         dest: File,
         onProgress: (Long, Long) -> Unit,
         isCancelled: () -> Boolean,
+        evictable: Boolean = false,
         onRedirect: (String) -> Unit,
     ): String {
             conn.instanceFollowRedirects = false
@@ -623,6 +815,7 @@ object Updater {
             }
             val digest = MessageDigest.getInstance("SHA-256")
             var done = 0L
+            val bodyStart = System.currentTimeMillis()
             conn.inputStream.use { input ->
                 FileOutputStream(dest).use { out ->
                     val buf = ByteArray(64 * 1024)
@@ -641,6 +834,15 @@ object Updater {
                             throw IllegalStateException("安装包体积异常，已中止下载")
                         }
                         onProgress(done, total)
+                        // 慢源淘汰（v2.22.55，口径同分片模式）：还有
+                        // 备用源时，慢源不值得等——中止换源重下。
+                        if (evictable &&
+                            done < SLOW_MIN_BYTES &&
+                            System.currentTimeMillis() - bodyStart >= SLOW_WINDOW_MS
+                        ) {
+                            dest.delete()
+                            throw IllegalStateException("下载源速度过慢，切换备用源")
+                        }
                     }
                 }
             }

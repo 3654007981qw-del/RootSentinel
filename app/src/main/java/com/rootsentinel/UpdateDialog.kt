@@ -60,6 +60,13 @@ class UpdateController {
         private set
     var progress by mutableStateOf(0f)
         private set
+    /** 实时下载速度（字节/秒，v2.22.55）与已下载/总字节，供弹窗展示 */
+    var speedBps by mutableStateOf(0L)
+        private set
+    var doneBytes by mutableStateOf(0L)
+        private set
+    var totalBytes by mutableStateOf(0L)
+        private set
     var errorText by mutableStateOf("")
         private set
 
@@ -125,6 +132,9 @@ class UpdateController {
         val inf = info ?: return
         cancelFlag = false
         progress = 0f
+        speedBps = 0L
+        doneBytes = 0L
+        totalBytes = inf.apkSize
         phase = Phase.Downloading
         scope.launch {
             try {
@@ -133,8 +143,13 @@ class UpdateController {
                     Updater.download(
                         inf,
                         file,
-                        onProgress = { done, total ->
-                            if (total > 0) progress = done.toFloat() / total
+                        onProgress = { done, total, speed ->
+                            doneBytes = done
+                            if (total > 0) {
+                                totalBytes = total
+                                progress = done.toFloat() / total
+                            }
+                            speedBps = speed
                         },
                         isCancelled = { cancelFlag },
                     )
@@ -281,11 +296,32 @@ fun UpdateDialog(
                             color = c.primary,
                         )
                         Spacer(Modifier.height(8.dp))
-                        Text(
-                            "${(controller.progress * 100).toInt()}%",
-                            fontSize = 13.sp,
-                            color = c.onBackgroundVariant,
-                        )
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            Text(
+                                "${(controller.progress * 100).toInt()}%",
+                                fontSize = 13.sp,
+                                color = c.onBackgroundVariant,
+                            )
+                            Text(
+                                Updater.formatSpeed(controller.speedBps),
+                                fontSize = 13.sp,
+                                color = c.onBackgroundVariant,
+                            )
+                        }
+                        if (controller.totalBytes > 0) {
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                "%.1f MB / %.1f MB".format(
+                                    controller.doneBytes / 1048576.0,
+                                    controller.totalBytes / 1048576.0,
+                                ),
+                                fontSize = 12.sp,
+                                color = c.onBackgroundVariant,
+                            )
+                        }
                         Spacer(Modifier.height(12.dp))
                         SecondaryText("取消下载") { controller.cancelDownload() }
                     }
