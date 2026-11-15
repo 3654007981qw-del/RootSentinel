@@ -45,11 +45,15 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
+      # 不用 android-actions/setup-android：v3 在当前 runner 镜像上
+      # 于 sdkmanager 子进程环节崩溃（2026-11-15 本 job 首跑与既有
+      # build job 同一步双双失败，属 action 基础设施问题）。runner
+      # 镜像自带 Android SDK（$ANDROID_SDK_ROOT，含 sdkmanager），
+      # 直接用它装固定版 NDK/CMake。
       - name: Install NDK + CMake
-        run: sdkmanager "ndk;27.2.12479018" "cmake;3.22.1"
+        run: |
+          yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
+          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "ndk;27.2.12479018" "cmake;3.22.1"
 
       - name: Build native (3 ABIs)
         run: |
