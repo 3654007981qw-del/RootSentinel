@@ -4,7 +4,7 @@ Android Root 环境检测器 —— Kotlin / Jetpack Compose UI + C++ NDK 检测
 
 在自有设备上被动检测 Root 痕迹、Hook/注入、系统完整性破坏与运行环境异常，输出四维评分与逐项证据。**全程只读**：不执行 `su`、不提权、不修改系统、不上传任何数据。
 
-当前版本：**2.22.46**（见 [CHANGELOG](CHANGELOG.md)）
+当前版本：**2.22.47**（见 [CHANGELOG](CHANGELOG.md)）
 
 ## 设计原则
 
