@@ -37,7 +37,7 @@ class ServiceDetector(private val context: Context) {
 
             @Suppress("UNCHECKED_CAST")
             val names = m.invoke(null) as? Array<String>
-                ?: return unknown("ServiceManager.listServices 返回 null")
+                ?: return unknown("F.SERVICE_LIST", "ServiceManager.listServices 返回 null")
 
             val keys = listOf(
                 "susfs", "kernelsu", "ksu", "apatch", "magisk",
@@ -71,19 +71,25 @@ class ServiceDetector(private val context: Context) {
                 )
             }
         } catch (t: Throwable) {
-            unknown("${t.javaClass.simpleName}: ${t.message}")
+            unknown("F.SERVICE_LIST", "${t.javaClass.simpleName}: ${t.message}")
         }
     }
 
     // --------------------------------------------------------------- F.AM_SELF
     private fun amSelf(): Evidence {
         val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
-            ?: return unknown("ActivityManager 不可用")
+            ?: return unknown("F.AM_SELF", "ActivityManager 不可用")
 
+        // v2.22.50（第六轮审查 #10）：读取异常与「列表为空」分开。
+        // 此前异常被吞成 null，与空列表合流到下面的 PASS 分支——
+        // 异常 ≠ 正常限制，必须落 UNKNOWN。
         val procs = try {
             am.runningAppProcesses
         } catch (t: Throwable) {
-            null
+            return unknown(
+                "F.AM_SELF",
+                "runningAppProcesses 读取异常: ${t.javaClass.simpleName}",
+            )
         }
 
         if (procs.isNullOrEmpty()) {
@@ -136,7 +142,7 @@ class ServiceDetector(private val context: Context) {
         val dir = try {
             context.applicationInfo.sourceDir
         } catch (t: Throwable) {
-            return unknown("sourceDir 不可读")
+            return unknown("F.APK_PATH", "sourceDir 不可读")
         }
 
         return if (dir.startsWith("/data/app/")) {
@@ -168,7 +174,7 @@ class ServiceDetector(private val context: Context) {
         val count = try {
             context.packageManager.getInstalledApplications(0).size
         } catch (t: Throwable) {
-            return unknown("getInstalledApplications 失败")
+            return unknown("F.PKG_COUNT", "getInstalledApplications 失败")
         }
 
         return if (count < 20) {
@@ -198,13 +204,17 @@ class ServiceDetector(private val context: Context) {
     }
 
     // ---------------------------------------------------------------- helpers
-    private fun unknown(msg: String) = Evidence(
-        id = "F.SERVICE_LIST",
+    // v2.22.50（第六轮审查 #10）：unknown() 必须显式传证据 ID。
+    // 此前写死 F.SERVICE_LIST，却被 amSelf / apkPath / pkgCount 复用，
+    // 产出的 UNKNOWN 顶着别人的 ID —— 评分前按 ID 去重时还会把
+    // 真 F.SERVICE_LIST 证据合并掉一条。
+    private fun unknown(id: String, msg: String) = Evidence(
+        id = id,
         category = Category.SELINUX,
         severity = Severity.LOW,
         confidence = Confidence.LOW,
         verdict = Verdict.UNKNOWN,
-        title = "系统服务列表不可读",
+        title = "检测通道不可用",
         detail = msg,
     )
 }

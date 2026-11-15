@@ -31,15 +31,29 @@ class SelfGuardDetector(private val context: Context) {
 
     // --------------------------------------------------------------- I.DEBUGGER
     private fun debugger(): Evidence {
+        // v2.22.50（第六轮审查 #9）：异常不再吞成 false。两个 API
+        // 任一抛异常 = 状态不可读，必须落 UNKNOWN —— 此前异常会
+        // 一路走到 PASS「无调试器附加」，违反「无法检测 ≠ 通过」。
         val connected = try {
             Debug.isDebuggerConnected()
         } catch (t: Throwable) {
-            false
+            null
         }
         val waiting = try {
             Debug.waitingForDebugger()
         } catch (t: Throwable) {
-            false
+            null
+        }
+        if (connected == null || waiting == null) {
+            return Evidence(
+                id = "I.DEBUGGER",
+                category = Category.INTEGRITY,
+                severity = Severity.LOW,
+                confidence = Confidence.LOW,
+                verdict = Verdict.UNKNOWN,
+                title = "调试器状态不可读",
+                detail = "Debug API 调用异常，无法确认是否有调试器附加",
+            )
         }
 
         return if (!connected && !waiting) {

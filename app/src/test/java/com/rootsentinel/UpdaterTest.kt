@@ -48,4 +48,49 @@ class UpdaterTest {
         assertFalse(Updater.isNewer("", "2.22.46"))
         assertFalse(Updater.isNewer("2.22.47", ""))
     }
+
+    // ---- decide() 三态合并（v2.22.50，第六轮审查 #12 回归） ----
+
+    private fun info() = Updater.UpdateInfo(
+        versionName = "9.9.9",
+        notes = "",
+        apkUrl = "https://example.invalid/a.apk",
+        apkSize = 1L,
+        sha256 = null,
+        source = "GitHub",
+    )
+
+    @Test
+    fun decidePrefersFoundFromEitherSource() {
+        val f = Updater.SourceOutcome.Found(info())
+        assertTrue(
+            Updater.decide(f, Updater.SourceOutcome.Failed)
+                is Updater.CheckResult.Found,
+        )
+        assertTrue(
+            Updater.decide(Updater.SourceOutcome.Failed, f)
+                is Updater.CheckResult.Found,
+        )
+    }
+
+    @Test
+    fun decideUpToDateWhenAnySourceAnswered() {
+        assertTrue(
+            Updater.decide(Updater.SourceOutcome.NoUpdate, Updater.SourceOutcome.Failed)
+                is Updater.CheckResult.UpToDate,
+        )
+        assertTrue(
+            Updater.decide(Updater.SourceOutcome.Failed, Updater.SourceOutcome.NoUpdate)
+                is Updater.CheckResult.UpToDate,
+        )
+    }
+
+    @Test
+    fun decideFailedWhenBothSourcesFailed() {
+        // 双源都失败 = 检查失败，绝不冒充「已是最新」
+        assertTrue(
+            Updater.decide(Updater.SourceOutcome.Failed, Updater.SourceOutcome.Failed)
+                is Updater.CheckResult.Failed,
+        )
+    }
 }

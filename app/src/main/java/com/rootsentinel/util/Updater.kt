@@ -44,6 +44,9 @@ object Updater {
         "https://gitee.com/api/v5/repos/AURORAqw/RootSentinel/releases/latest"
     private const val FILEPROVIDER_AUTHORITY = "com.rootsentinel.fileprovider"
 
+    /** 更新包体积硬帽（64 MB；当前发布包约 16 MB） */
+    private const val MAX_APK_BYTES = 64L * 1024 * 1024
+
     data class UpdateInfo(
         val versionName: String,
         val notes: String,
@@ -69,38 +72,87 @@ object Updater {
         return false
     }
 
-    /** 查新版：GitHub 优先，失败/无新版再试 Gitee。阻塞调用，走 IO 线程。 */
-    fun check(): UpdateInfo? =
-        checkFrom(GITHUB_LATEST, "GitHub") ?: checkFrom(GITEE_LATEST, "Gitee")
+    /** 单个更新源的答复。只有拿到 HTTP 200 的源才有资格下结论。 */
+    sealed interface SourceOutcome {
+        data class Found(val info: UpdateInfo) : SourceOutcome
 
-    private fun checkFrom(api: String, source: String): UpdateInfo? = runCatching {
-        val conn = openGet(api)
-        if (conn.responseCode != 200) return null
-        val json = JSONObject(conn.inputStream.bufferedReader().readText())
-        val tag = json.optString("tag_name").removePrefix("v")
-        if (tag.isEmpty() || !isNewer(tag, RootSentinelVersion.NAME)) return null
-        val assets = json.optJSONArray("assets") ?: return null
-        var apk: JSONObject? = null
-        for (i in 0 until assets.length()) {
-            val a = assets.optJSONObject(i) ?: continue
-            if (a.optString("name").endsWith("-release.apk")) {
-                apk = a
-                break
-            }
+        /** 源明确答复：没有更新的版本（或新版没有可用的 release APK） */
+        data object NoUpdate : SourceOutcome
+
+        /** 网络错误 / 非 200 / 内容损坏：这个源没能给出答复 */
+        data object Failed : SourceOutcome
+    }
+
+    /** 检查更新的最终结论（v2.22.50 起三分，见 [decide]）。 */
+    sealed interface CheckResult {
+        data class Found(val info: UpdateInfo) : CheckResult
+        data object UpToDate : CheckResult
+        data object Failed : CheckResult
+    }
+
+    /**
+     * 两源答符合并规则（纯函数，可单测）：任一源 Found → Found；
+     * 否则任一源明确 NoUpdate → 已是最新；两源都 Failed → 检查失败。
+     * v2.22.50（第六轮审查 #12）：此前 check() 用一个 null 同时表示
+     * 这三种情况，双源不可达时界面会误报「已是最新版本」。
+     */
+    fun decide(first: SourceOutcome, second: SourceOutcome): CheckResult = when {
+        first is SourceOutcome.Found -> CheckResult.Found(first.info)
+        second is SourceOutcome.Found -> CheckResult.Found(second.info)
+        first is SourceOutcome.NoUpdate || second is SourceOutcome.NoUpdate ->
+            CheckResult.UpToDate
+        else -> CheckResult.Failed
+    }
+
+    /** 查新版：GitHub 优先，找到就不问 Gitee。阻塞调用，走 IO 线程。 */
+    fun check(): CheckResult {
+        val gh = checkFrom(GITHUB_LATEST, "GitHub")
+        if (gh is SourceOutcome.Found) return CheckResult.Found(gh.info)
+        val gt = checkFrom(GITEE_LATEST, "Gitee")
+        return decide(gh, gt)
+    }
+
+    private fun checkFrom(api: String, source: String): SourceOutcome {
+        val conn = try {
+            openGet(api)
+        } catch (t: Throwable) {
+            return SourceOutcome.Failed
         }
-        val a = apk ?: return null
-        val url = a.optString("browser_download_url")
-        if (url.isEmpty()) return null
-        UpdateInfo(
-            versionName = tag,
-            notes = json.optString("body"),
-            apkUrl = url,
-            apkSize = a.optLong("size"),
-            sha256 = a.optString("digest").removePrefix("sha256:")
-                .ifEmpty { null },
-            source = source,
-        )
-    }.getOrNull()
+        try {
+            if (conn.responseCode != 200) return SourceOutcome.Failed
+            val json = JSONObject(conn.inputStream.bufferedReader().readText())
+            val tag = json.optString("tag_name").removePrefix("v")
+            if (tag.isEmpty()) return SourceOutcome.Failed
+            if (!isNewer(tag, RootSentinelVersion.NAME)) return SourceOutcome.NoUpdate
+            val assets = json.optJSONArray("assets") ?: return SourceOutcome.NoUpdate
+            var apk: JSONObject? = null
+            for (i in 0 until assets.length()) {
+                val a = assets.optJSONObject(i) ?: continue
+                if (a.optString("name").endsWith("-release.apk")) {
+                    apk = a
+                    break
+                }
+            }
+            val a = apk ?: return SourceOutcome.NoUpdate
+            val url = a.optString("browser_download_url")
+            if (url.isEmpty()) return SourceOutcome.NoUpdate
+            return SourceOutcome.Found(
+                UpdateInfo(
+                    versionName = tag,
+                    notes = json.optString("body"),
+                    apkUrl = url,
+                    apkSize = a.optLong("size"),
+                    sha256 = a.optString("digest").removePrefix("sha256:")
+                        .ifEmpty { null },
+                    source = source,
+                ),
+            )
+        } catch (t: Throwable) {
+            return SourceOutcome.Failed
+        } finally {
+            conn.disconnect()
+        }
+    }
 
     private fun openGet(url: String): HttpURLConnection {
         val conn = URL(url).openConnection() as HttpURLConnection
@@ -145,6 +197,12 @@ object Updater {
             } else {
                 info.apkSize
             }
+            // v2.22.50（第六轮审查 #21）：下载体积硬帽。发布包约 16 MB，
+            // 64 MB 给足余量；超限说明来源异常，直接中止——后面还有
+            // SHA/包名/签名三重校验，这里是纵深防御的第一道。
+            if (total > MAX_APK_BYTES) {
+                throw IllegalStateException("安装包体积异常（$total 字节），已中止下载")
+            }
             val digest = MessageDigest.getInstance("SHA-256")
             var done = 0L
             conn.inputStream.use { input ->
@@ -160,6 +218,11 @@ object Updater {
                         out.write(buf, 0, n)
                         digest.update(buf, 0, n)
                         done += n
+                        if (done > MAX_APK_BYTES) {
+                            // 实际流量超限（Content-Length 缺失/造假时）
+                            dest.delete()
+                            throw IllegalStateException("安装包体积异常，已中止下载")
+                        }
                         onProgress(done, total)
                     }
                 }

@@ -234,6 +234,11 @@ object ScoringModel {
     private val ROOT_OVERRIDE_IDS = setOf(
         // I 类里这几项其实在测「提权能力」，不是自身完整性
         "I.CAP_EFF", "I.UID_MAP", "I.SETUID", "I.PERM_GRANTED", "I.SELF_SO_PATH",
+        // v2.22.50（第六轮审查 #8）：F.KSU_NODE 是 native 以 KERNEL 类
+        // 产出的 KernelSU 节点命中，类别码 F 在 Kotlin 侧落入 SELINUX
+        // 桶、默认归 INTEGRITY —— KernelSU 节点可见是明确的提权事实，
+        // 必须归 ROOT，否则只涨完整性分、Root 分纹丝不动，可能漏判。
+        "F.KSU_NODE",
     )
 
     private val ENV_IDS = setOf(
@@ -286,7 +291,9 @@ object ScoringModel {
     /** 调试器 / 跟踪器：属于「调试风险」，与注入并列归 HOOK 维度下的调试侧 */
     private val DEBUG_IDS = setOf(
         "E.TRACER", "E.PTRACE", "E.DEBUGGER_WAIT", "E.ANTIDEBUG",
-        "I.DEBUGGER", "I.SELF_DEBUGGABLE",
+        // v2.22.50（第六轮审查 #21）：I.DEBUGGER 原同时在 ENV_IDS 里，
+        // dimensionOf 先查 ENV，这里的条目永远不可达，已删除以免误导。
+        "I.SELF_DEBUGGABLE",
     )
 
     /** 注入 / Hook / 运行时篡改：HOOK 维度 */
@@ -571,7 +578,11 @@ object ScoringModel {
         for (c in crosses) {
             if (!c.consistent) {
                 hookScore += CROSSCHECK_BONUS
-                hit++
+                // v2.22.50（第六轮审查 #11）：不再 hit++。三个 CrossCheck
+                // 生产者（X.CHILD_PROC / C.MOUNT_MULTI / C.META_MISMATCH）
+                // 都同时产出 Evidence 本体，命中已在主循环计过；这里再计
+                // 一次会让同一事实在命中数里出现两次（且会进上报口径）。
+                // CROSSCHECK_BONUS 作为「交叉矛盾额外权重」保留，是设计。
                 notes += "交叉验证矛盾: ${c.subject}"
             }
         }
@@ -591,7 +602,10 @@ object ScoringModel {
         //   · PERMISSION_DENIED / CONDITIONAL / REQUIRED 计入
         //   · 分母过小时回退到兜底值，防止「几乎没跑」反而覆盖率虚高
         val fallback = expectedMin ?: BASELINE_ITEMS
-        val denom = applicableDenominator(deduped, crosses.size, fallback)
+        // v2.22.50（第六轮审查 #11）：分母不再加 crosses.size ——
+        // CrossCheck 与 Evidence 本体是同一批检查的两个视角，
+        // 计入分母会让同一检查在覆盖率里被代表两次（分子同理，见下）。
+        val denom = applicableDenominator(deduped, 0, fallback)
 
         // 统计各类适用性，写进 notes 便于排查
         var cntNotApplicable = 0
@@ -607,10 +621,11 @@ object ScoringModel {
         }
 
         // 「得出结论」的项：非 UNKNOWN/ERROR/SKIPPED/TIMEOUT，且适用
+        // （v2.22.50 起不再 + crosses.size，理由同分母处注释）
         val concluded = deduped.count {
             !it.effectiveState.isInconclusive &&
                 applicabilityOf(it) != Applicability.NOT_APPLICABLE
-        } + crosses.size
+        }
 
         val coverage = if (denom == 0) 0.0
         else (concluded.toDouble() / denom).coerceIn(0.0, 1.0)

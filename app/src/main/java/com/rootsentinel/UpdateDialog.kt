@@ -60,39 +60,56 @@ class UpdateController {
     private var downloaded: File? = null
     private var busy = false
 
+    /**
+     * 检查完成的统一落点（v2.22.50，第六轮审查 #12）：
+     * 结论三分——有新版永远弹窗；已最新/检查失败只在弹窗已开着时
+     * 给反馈（手动检查、或自动检查进行中被用户打开的弹窗），
+     * 没开就不打扰。此前 null 被一律当成「已是最新」，双源不可达
+     * 时会误报；且手动检查撞上自动检查时弹窗停在 Idle 渲染空白。
+     */
+    private fun onCheckDone(result: Updater.CheckResult) {
+        busy = false
+        when (result) {
+            is Updater.CheckResult.Found -> {
+                info = result.info
+                phase = Phase.Available
+                dialogVisible = true
+            }
+            Updater.CheckResult.UpToDate -> {
+                if (dialogVisible) phase = Phase.UpToDate
+            }
+            Updater.CheckResult.Failed -> {
+                if (dialogVisible) {
+                    errorText = "检查更新失败：网络不可达或更新源无响应，请稍后重试"
+                    phase = Phase.Error
+                }
+            }
+        }
+    }
+
     /** 启动时自动检查：静默进行，只有发现新版才弹窗。 */
     fun checkAuto(scope: CoroutineScope) {
         if (busy || phase == Phase.Available) return
         busy = true
         scope.launch {
-            val found = withContext(Dispatchers.IO) { Updater.check() }
-            busy = false
-            if (found != null) {
-                info = found
-                phase = Phase.Available
-                dialogVisible = true
-            }
+            val result = withContext(Dispatchers.IO) { Updater.check() }
+            onCheckDone(result)
         }
     }
 
-    /** 设置页手动检查：立即弹窗，查不到新版也给明确反馈。 */
+    /** 设置页手动检查：立即弹窗，任何结论都给明确反馈。 */
     fun checkManual(scope: CoroutineScope) {
-        if (busy) {
+        if (phase == Phase.Available && info != null) {
             dialogVisible = true
             return
         }
-        busy = true
         dialogVisible = true
         phase = Phase.Checking
+        if (busy) return // 已有检查在跑，其完成回调会填充本弹窗
+        busy = true
         scope.launch {
-            val found = withContext(Dispatchers.IO) { Updater.check() }
-            busy = false
-            if (found != null) {
-                info = found
-                phase = Phase.Available
-            } else {
-                phase = Phase.UpToDate
-            }
+            val result = withContext(Dispatchers.IO) { Updater.check() }
+            onCheckDone(result)
         }
     }
 
