@@ -27,11 +27,14 @@ jobs:
           yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
           "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "platforms;android-35" "build-tools;35.0.1"
 
+      # gradle.properties 被 .gitignore 排除（2026-11-14 清理后定下的
+      # 规矩：防签名密码误入该文件再被提交），所以 CI 里没有这个
+      # 文件；构建必需的非机密属性用 -P 显式传入。
       - name: Unit tests
-        run: ./gradlew :app:testDebugUnitTest
+        run: ./gradlew :app:testDebugUnitTest -Pandroid.useAndroidX=true
 
       - name: Assemble debug
-        run: ./gradlew :app:assembleDebug
+        run: ./gradlew :app:assembleDebug -Pandroid.useAndroidX=true
 
   native:
     # v2.22.53（第八轮审查 P3-02）：此前 CI 只有上面的 Gradle job，
