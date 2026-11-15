@@ -234,6 +234,7 @@ object Updater {
      * 下载候选。decide() 的三态语义不变。
      */
     fun check(): CheckResult {
+        activeConns.clear()
         val pool = Executors.newFixedThreadPool(2)
         try {
             val ecs = java.util.concurrent.ExecutorCompletionService<
@@ -381,6 +382,22 @@ object Updater {
         }
     }
 
+    /**
+     * 当前打开中的连接登记表（v2.22.57）：取消下载时统一
+     * disconnect，让阻塞在 connect/read 上的调用立刻抛错返回，
+     * 而不是等 10~15 秒超时——旧版取消按钮在黑洞源上看起来
+     * 完全没反应就是因为没这一手。登记在 openGet 统一做；
+     * check()/download() 入口会先清表，避免误伤别的阶段。
+     */
+    private val activeConns =
+        java.util.Collections.synchronizedSet(mutableSetOf<HttpURLConnection>())
+
+    /** 断开当前登记的全部连接（取消下载时调用）。 */
+    fun cancelActive() {
+        val snapshot = synchronized(activeConns) { activeConns.toList() }
+        snapshot.forEach { runCatching { it.disconnect() } }
+    }
+
     private fun openGet(
         url: String,
         shortTimeout: Boolean = false,
@@ -391,6 +408,7 @@ object Updater {
         conn.readTimeout = timeoutMs ?: if (shortTimeout) 5_000 else 15_000
         conn.setRequestProperty("User-Agent", "RootSentinel/${RootSentinelVersion.NAME}")
         conn.setRequestProperty("Accept", "application/json")
+        activeConns.add(conn)
         return conn
     }
 
@@ -418,6 +436,7 @@ object Updater {
         onProgress: (Long, Long, Long) -> Unit,
         isCancelled: () -> Boolean,
     ): String {
+        activeConns.clear()
         dest.parentFile?.mkdirs()
         val meter = SpeedMeter()
         val report = { done: Long, total: Long ->
@@ -425,6 +444,9 @@ object Updater {
         }
         val rawUrls = info.candidates.ifEmpty { listOf(info.apkUrl) }
         val total = resolveTotal(info, rawUrls)
+        // 先报一次 0 进度：让弹窗立刻显示总大小，测速阶段不再
+        // 是长时间 0% 且总量空白（v2.22.57）
+        if (total > 0) report(0L, total)
         if (total > MAX_APK_BYTES) {
             throw IllegalStateException("安装包体积异常（$total 字节），已中止下载")
         }
@@ -434,7 +456,7 @@ object Updater {
         // 因）。探测失败的源不剔除，只沉底作兜底。
         val (urls, preNoRange) =
             if (rawUrls.size > 1 && (total < 0 || total > 1024 * 1024)) {
-                probeAndRank(rawUrls, total)
+                probeAndRank(rawUrls, total, isCancelled)
             } else {
                 rawUrls to emptySet()
             }
@@ -457,6 +479,7 @@ object Updater {
     private fun probeAndRank(
         urls: List<String>,
         total: Long,
+        isCancelled: () -> Boolean = { false },
     ): Pair<List<String>, Set<String>> {
         val speeds = java.util.concurrent.ConcurrentHashMap<String, Long>()
         val noRange = java.util.Collections.synchronizedSet(mutableSetOf<String>())
@@ -476,6 +499,7 @@ object Updater {
                 }
             }
             futures.forEach {
+                if (isCancelled()) throw InterruptedException("已取消")
                 runCatching { it.get(10, java.util.concurrent.TimeUnit.SECONDS) }
             }
         } finally {
@@ -644,27 +668,57 @@ object Updater {
         val noRange = java.util.Collections.synchronizedSet(
             mutableSetOf<String>().apply { addAll(initialNoRange) },
         )
+        // 连接级失败（黑洞/超时）的源隔离（v2.22.57）：同一源在
+        // 本次下载里连接失败累计 2 次就拉黑，不再让每个分片都
+        // 去它身上白等 10~25 秒——旧版在国内黑洞源上长时间
+        // 0% 的主因之一。
+        val dead = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+        val failCounts = java.util.concurrent.ConcurrentHashMap<String, Int>()
         val pool = Executors.newFixedThreadPool(plan.size.coerceAtMost(6))
         try {
             val futures = plan.mapIndexed { i, range ->
                 pool.submit<Unit> {
-                    downloadChunk(urls, range, partFiles[i], noRange, doneBytes, total, onProgress, isCancelled)
+                    downloadChunk(urls, range, partFiles[i], noRange, dead, failCounts, doneBytes, total, onProgress, isCancelled)
                 }
             }
+            // 全局无进度看门狗（v2.22.57）：所有分片合计 25 秒
+            // 一个字节都没进账，说明源全在黑洞/假死，直接中止
+            // 报错让用户重试，不再无限期挂在 0%。
+            var lastDone = doneBytes.get()
+            var lastProgressAt = System.currentTimeMillis()
             while (futures.any { !it.isDone }) {
                 if (isCancelled()) throw InterruptedException("已取消")
-                onProgress(doneBytes.get(), total)
+                val nowDone = doneBytes.get()
+                if (nowDone != lastDone) {
+                    lastDone = nowDone
+                    lastProgressAt = System.currentTimeMillis()
+                } else if (System.currentTimeMillis() - lastProgressAt > STALL_LIMIT_MS) {
+                    throw StallException()
+                }
+                onProgress(nowDone, total)
                 Thread.sleep(200)
             }
             futures.forEach { it.get() } // 失败在此以 ExecutionException 抛出
         } catch (e: InterruptedException) {
             pool.shutdownNow()
             throw e
+        } catch (e: StallException) {
+            pool.shutdownNow()
+            cancelActive()
+            throw IllegalStateException("下载长时间无进度（网络无响应），已自动中止，请检查网络后重试")
         } catch (e: Exception) {
             pool.shutdownNow()
+            // 分片走不通但存在已知的不支持 Range 的源 → 退单流
+            if (urls.all { it in noRange || it in dead } && urls.any { it in noRange }) {
+                return null
+            }
             if (noRange.containsAll(urls)) return null
             val cause = (e as? java.util.concurrent.ExecutionException)?.cause ?: e
             if (cause is InterruptedException) throw cause
+            if (cause is StallException) {
+                cancelActive()
+                throw IllegalStateException("下载长时间无进度（网络无响应），已自动中止，请检查网络后重试")
+            }
             throw IllegalStateException(cause.message ?: "下载失败，请检查网络后重试")
         }
         pool.shutdown()
@@ -712,12 +766,20 @@ object Updater {
     /** 慢源内部信号：当前连接太慢，断开换源。 */
     private class SlowSourceException : Exception("下载源速度过慢")
 
+    /** 全局无进度看门狗阈值（v2.22.57）：见 downloadChunked。 */
+    private const val STALL_LIMIT_MS = 25_000L
+
+    /** 无进度内部信号：全部源合计长时间零字节进账。 */
+    private class StallException : Exception("下载长时间无进度")
+
     /** 下载单个分片：按候选顺序逐源续下同一字节区间。 */
     private fun downloadChunk(
         urls: List<String>,
         range: LongRange,
         part: File,
         noRange: MutableSet<String>,
+        dead: MutableSet<String>,
+        failCounts: java.util.concurrent.ConcurrentHashMap<String, Int>,
         doneBytes: AtomicLong,
         total: Long,
         onProgress: (Long, Long) -> Unit,
@@ -736,8 +798,8 @@ object Updater {
             var progressed = false
             for (u in urls) {
                 if (have >= chunkLen) break
-                if (noRange.contains(u)) continue
-                when (val r = openRange(u, range.first + have, range.last)) {
+                if (noRange.contains(u) || dead.contains(u)) continue
+                when (val r = openRange(u, range.first + have, range.last, timeoutMs = 8_000)) {
                     is RangeResult.Part -> {
                         attempts++
                         // 慢源淘汰只在前 urls.size 次连接启用：每个源
@@ -790,6 +852,12 @@ object Updater {
                     }
                     is RangeResult.Fail -> {
                         lastError = IllegalStateException("HTTP ${r.code}")
+                        // code == -1 是连接级失败（黑洞/超时/断连）：
+                        // 累计 2 次拉黑这个源，本次下载不再碰它
+                        if (r.code == -1) {
+                            val c = failCounts.merge(u, 1) { a, b -> a + b } ?: 1
+                            if (c >= 2) dead.add(u)
+                        }
                     }
                 }
             }

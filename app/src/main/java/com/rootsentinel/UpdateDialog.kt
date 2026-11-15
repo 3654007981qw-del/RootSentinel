@@ -70,6 +70,9 @@ class UpdateController {
     var errorText by mutableStateOf("")
         private set
 
+    // IO 线程高频读、主线程写：必须 @Volatile，旧版普通 var
+    // 不保证可见性，取消可能永远传不到下载线程（v2.22.57）
+    @Volatile
     private var cancelFlag = false
     private var downloaded: File? = null
     private var busy = false
@@ -189,6 +192,9 @@ class UpdateController {
 
     fun cancelDownload() {
         cancelFlag = true
+        // 同时断开在飞连接：阻塞中的 connect/read 立刻抛错，
+        // 取消即时生效，不再等超时（v2.22.57）
+        Updater.cancelActive()
     }
 
     fun dismiss() {
