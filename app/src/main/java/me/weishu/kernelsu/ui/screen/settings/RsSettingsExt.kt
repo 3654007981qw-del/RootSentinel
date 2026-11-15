@@ -11,6 +11,7 @@ import androidx.compose.runtime.Immutable
 @Immutable
 data class RsPrivacyState(
     val telemetryEnabled: Boolean,
+    val crashUploadEnabled: Boolean,
     val autoExport: Boolean,
     val keepHistory: Boolean,
 )
@@ -18,6 +19,7 @@ data class RsPrivacyState(
 @Immutable
 data class RsSettingsActions(
     val onSetTelemetryEnabled: (Boolean) -> Unit,
+    val onSetCrashUploadEnabled: (Boolean) -> Unit,
     val onSetAutoExport: (Boolean) -> Unit,
     val onSetKeepHistory: (Boolean) -> Unit,
     val onCheckUpdateClick: () -> Unit,

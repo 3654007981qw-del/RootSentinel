@@ -365,6 +365,15 @@ fun SettingPagerMaterial(
                     },
                     {
                         SegmentedSwitchItem(
+                            icon = Icons.Filled.BugReport,
+                            title = "上传崩溃日志",
+                            summary = "崩溃时保存堆栈，下次启动自动上传",
+                            checked = rsPrivacy.crashUploadEnabled,
+                            onCheckedChange = rsActions.onSetCrashUploadEnabled
+                        )
+                    },
+                    {
+                        SegmentedSwitchItem(
                             icon = Icons.Filled.SaveAlt,
                             title = "扫描后自动导出",
                             summary = "把报告 JSON 自动保存到应用文件目录",

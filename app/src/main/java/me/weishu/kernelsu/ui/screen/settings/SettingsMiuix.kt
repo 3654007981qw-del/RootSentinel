@@ -471,6 +471,20 @@ fun SettingPagerMiuix(
                             onCheckedChange = rsActions.onSetTelemetryEnabled
                         )
                         SwitchPreference(
+                            title = "上传崩溃日志",
+                            summary = "崩溃时保存堆栈，下次启动自动上传",
+                            startAction = {
+                                Icon(
+                                    Icons.Rounded.BugReport,
+                                    modifier = Modifier.padding(end = 6.dp),
+                                    contentDescription = "上传崩溃日志",
+                                    tint = colorScheme.onBackground
+                                )
+                            },
+                            checked = rsPrivacy.crashUploadEnabled,
+                            onCheckedChange = rsActions.onSetCrashUploadEnabled
+                        )
+                        SwitchPreference(
                             title = "扫描后自动导出",
                             summary = "把报告 JSON 自动保存到应用文件目录",
                             startAction = {

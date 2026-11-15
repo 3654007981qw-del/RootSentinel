@@ -124,6 +124,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         ksuApp = application
+        // v2.22.64：尽早装崩溃捕获（只落盘，下次启动再按开关上传）
+        com.rootsentinel.util.CrashReporter.install(application)
         enableEdgeToEdge()
         val auto = intent?.getStringExtra("auto")
         val tab = intent?.getIntExtra("tab", 0) ?: 0
@@ -280,6 +282,12 @@ fun RootApp(auto: String?, initialTab: Int, initialSub: String?) {
         }
     }
     // DEBUG 自动化入口：auto=scan 直接开扫
+    // v2.22.64：上次崩溃的堆栈在本次启动补传（声明已确认且开关开时）
+    LaunchedEffect(settings.declarationSeen, settings.crashUploadEnabled) {
+        if (settings.declarationSeen && settings.crashUploadEnabled) {
+            scope.launch(Dispatchers.IO) { com.rootsentinel.util.CrashReporter.uploadPending(ksuApp) }
+        }
+    }
     LaunchedEffect(Unit) {
         if (auto == "scan" && settings.declarationSeen) startScan()
     }
@@ -432,11 +440,13 @@ fun RootApp(auto: String?, initialTab: Int, initialSub: String?) {
     )
     val rsPrivacy = RsPrivacyState(
         telemetryEnabled = settings.telemetryEnabled,
+        crashUploadEnabled = settings.crashUploadEnabled,
         autoExport = settings.autoExport,
         keepHistory = settings.keepHistory,
     )
     val rsActions = RsSettingsActions(
         onSetTelemetryEnabled = { settings.telemetryEnabled = it },
+        onSetCrashUploadEnabled = { settings.crashUploadEnabled = it },
         onSetAutoExport = { settings.autoExport = it },
         onSetKeepHistory = { settings.keepHistory = it },
         onCheckUpdateClick = {

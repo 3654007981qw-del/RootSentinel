@@ -350,6 +350,15 @@ class SettingsStore(context: Context) {
             _telemetryEnabled = v
             sp.edit().putBoolean("telemetryEnabled", v).apply()
         }
+
+    /** 崩溃日志自动上传开关（v2.22.64）：默认开，与诊断摘要分开控制，见 util/CrashReporter。 */
+    private var _crashUploadEnabled by mutableStateOf(sp.getBoolean("crashUploadEnabled", true))
+    var crashUploadEnabled: Boolean
+        get() = _crashUploadEnabled
+        set(v) {
+            _crashUploadEnabled = v
+            sp.edit().putBoolean("crashUploadEnabled", v).apply()
+        }
 }
 /**
  * 最新报告 JSON 的提供者（v2.22.60）：照抄过来的 KernelSU 设置页里有
