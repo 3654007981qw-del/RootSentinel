@@ -106,7 +106,7 @@ if (hasSigning && releaseSha == null) {
 
 android {
     namespace = "com.rootsentinel"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.rootsentinel"
