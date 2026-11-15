@@ -44,6 +44,25 @@ class SelfGuardDetector(private val context: Context) {
         } catch (t: Throwable) {
             null
         }
+        // v2.22.51（第七轮审查 #2）：真值表优先于异常处理——任一 API
+        // 明确报 true 就是确定性命中，不许被另一个 API 的异常盖成
+        // UNKNOWN（.50 的改法矫枉过正）。只有双 false 才 PASS；
+        // 剩下的组合（无命中但有一侧读不到）才落 UNKNOWN。
+        if (connected == true || waiting == true) {
+            return Evidence(
+                id = "I.DEBUGGER",
+                category = Category.INTEGRITY,
+                severity = Severity.CRITICAL,
+                confidence = Confidence.HIGH,
+                verdict = Verdict.HIT,
+                title = "检测到调试器",
+                vectors = listOf(
+                    "connected=$connected",
+                    "waiting=$waiting",
+                ),
+                detail = "调试器可绕过几乎所有 Java 层检测",
+            )
+        }
         if (connected == null || waiting == null) {
             return Evidence(
                 id = "I.DEBUGGER",

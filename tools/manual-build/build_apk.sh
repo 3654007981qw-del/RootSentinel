@@ -3,6 +3,11 @@ export PATH="$HOME/workspace/tools/jdk-21/bin:$PATH"
 # RootSentinel v2.22.41 手工构建管线（改编自 v2.5.0 的 build_manual.sh）
 # 阶段: prep res rjava native kotlin dex pkg verify
 set -u
+set -o pipefail
+# v2.22.51 (audit round 7, #1): pipefail + per-stage hard failure gates.
+# Previously kotlinc/D8 output ran through grep|head pipelines whose
+# exit status masked compiler failure, and output dirs were never
+# cleaned, so a failed or partial compile could ship stale classes.
 SRC=$HOME/workspace/rs2240-src/RootSentinel
 RB=$HOME/workspace/rs2241-build
 DEPS=$RB/deps
@@ -14,8 +19,8 @@ NDK=$SDK/ndk/27.2.12479018
 JAVAC=/usr/lib/jvm/java-21-openjdk-amd64/bin/javac
 JAVA=/usr/lib/jvm/java-21-openjdk-amd64/bin/java
 APPID=com.rootsentinel
-VCODE=22250
-VNAME=2.22.50
+VCODE=22251
+VNAME=2.22.51
 # 本次构建的签名身份：rsbuild 的 rs.jks（AURORA 侧密钥）。
 # native 基线注入同一证书指纹，保证 I.APK_SIGNATURE 自洽。
 SIGNER_SHA=06377C87CB33D9AB1B0BAE330135AB67404AB96DEEA9F3584DDF2B2FFCDC7A06
@@ -137,6 +142,8 @@ stage_kotlin() {
   for j in "$WORK"/jars/*.jar; do CP="$CP:$j"; done
   find "$SRC/app/src/main/java" -name '*.kt' > "$WORK/sources.txt"
   wc -l < "$WORK/sources.txt"
+  rm -rf "$WORK/kotlin-classes"
+  mkdir -p "$WORK/kotlin-classes"
   "$JAVA" -Xmx1400m -cp "$DEPS/kotlin-compiler-embeddable-2.2.20.jar:$DEPS/kotlin-stdlib-2.3.20.jar:$DEPS/kotlin-reflect-2.2.20.jar:$WORK/jars/org.jetbrains.kotlinx_kotlinx-coroutines-core-jvm_1.9.0.jar:$DEPS/org.jetbrains.intellij.deps_trove4j_1.0.20200330.jar:$DEPS/org.jetbrains_annotations_23.0.0.jar" \
     org.jetbrains.kotlin.cli.jvm.K2JVMCompiler \
     -cp "$CP" -d "$WORK/kotlin-classes" \
@@ -148,7 +155,13 @@ stage_kotlin() {
     -opt-in=androidx.compose.animation.ExperimentalAnimationApi \
     -opt-in=kotlinx.coroutines.ExperimentalCoroutinesApi \
     @"$WORK/sources.txt" 2>&1 | tee "$WORK/kotlinc.log" | grep -E ': error:' | head -40
-  echo "errors=$(grep -c ': error:' "$WORK/kotlinc.log" || true)"
+  local errs
+  errs=$(grep -c ': error:' "$WORK/kotlinc.log" || true)
+  echo "errors=$errs"
+  if [ "$errs" != "0" ]; then echo "KOTLIN FAILED: $errs compile errors"; return 1; fi
+  if [ -z "$(find "$WORK/kotlin-classes" -name '*.class' -print -quit)" ]; then
+    echo "KOTLIN FAILED: no classes produced (compiler crash?)"; return 1
+  fi
 }
 
 stage_dex() {
@@ -158,11 +171,14 @@ stage_dex() {
   cp -r "$WORK/r-classes/." "$WORK/appjar-content/"
   rm -f "$WORK/app.jar"
   /usr/lib/jvm/java-21-openjdk-amd64/bin/jar --create --file "$WORK/app.jar" -C "$WORK/appjar-content" .
+  rm -rf "$WORK/dex-release"
   mkdir -p "$WORK/dex-release"
   local INPUTS=("$WORK/app.jar")
   for j in "$WORK"/jars/*.jar; do INPUTS+=("$j"); done
   "$JAVA" -Xmx1200m -cp "$BT/lib/d8.jar" com.android.tools.r8.D8 \
-    --min-api 26 --lib "$AJAR" --output "$WORK/dex-release" "${INPUTS[@]}" 2>&1 | grep -vE '^Warning in .* (program|library)' | head -20
+    --min-api 26 --lib "$AJAR" --output "$WORK/dex-release" "${INPUTS[@]}" > "$WORK/d8.log" 2>&1 || { echo "D8 FAILED"; tail -20 "$WORK/d8.log"; return 1; }
+  grep -vE '^Warning in .* (program|library)' "$WORK/d8.log" | head -20 || true
+  [ -f "$WORK/dex-release/classes.dex" ] || { echo "D8 FAILED: no classes.dex"; return 1; }
   ls -la "$WORK/dex-release"
 }
 
@@ -174,6 +190,31 @@ stage_pkg() {
   "$BT/apksigner" sign --ks "$KS" --ks-pass file:"$KSPASS" \
     --out "$WORK/RootSentinel-v$VNAME-release.apk" "$WORK/rs-release-aligned.apk" || return 1
   ls -la "$WORK/RootSentinel-v$VNAME-release.apk"
+  stage_gate "$WORK/RootSentinel-v$VNAME-release.apk" || return 1
+}
+
+stage_gate() {
+  # Ship gate (round 7 #1): the audits that used to be manual steps,
+  # now enforced in-script before any release leaves the pipeline.
+  local apk="$1"
+  [ -f "$apk" ] || { echo "GATE FAIL: no apk"; return 1; }
+  local badging
+  badging=$("$BT/aapt2" dump badging "$apk") || { echo "GATE FAIL: badging run"; return 1; }
+  grep -q "versionCode='$VCODE' versionName='$VNAME'" <<<"$badging" || { echo "GATE FAIL: badging version"; return 1; }
+  "$BT/apksigner" verify "$apk" >/dev/null || { echo "GATE FAIL: signature"; return 1; }
+  local tmp; tmp=$(mktemp -d)
+  unzip -o -q "$apk" 'classes*.dex' 'lib/*/librootsentinel.so' -d "$tmp" || { echo "GATE FAIL: unzip"; rm -rf "$tmp"; return 1; }
+  [ -f "$tmp/classes.dex" ] || { echo "GATE FAIL: no classes.dex in apk"; rm -rf "$tmp"; return 1; }
+  local stale
+  stale=$(cat "$tmp"/classes*.dex | strings | grep -oE '2\.22\.[0-9]+' | sort -u | grep -vx "$VNAME" || true)
+  [ -z "$stale" ] || { echo "GATE FAIL: stale version strings in dex: $stale"; rm -rf "$tmp"; return 1; }
+  local abi vs
+  for abi in arm64-v8a x86_64; do
+    vs=$(strings "$tmp/lib/$abi/librootsentinel.so" | grep -oE '2\.22\.[0-9]+' | sort -u)
+    [ "$vs" = "$VNAME" ] || { echo "GATE FAIL: $abi .so version strings: $vs"; rm -rf "$tmp"; return 1; }
+  done
+  rm -rf "$tmp"
+  echo "GATE OK: badging/signature/dex/.so all at $VNAME"
 }
 
 stage_verify() {
@@ -190,5 +231,6 @@ case "${1:-}" in
   dex) stage_dex ;;
   pkg) stage_pkg ;;
   verify) stage_verify "${2:-}" ;;
+  gate) stage_gate "${2:-}" ;;
   *) echo "usage: $0 prep|res|rjava|native|kotlin|dex|pkg|verify <apk>" ;;
 esac
