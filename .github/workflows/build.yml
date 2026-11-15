@@ -19,8 +19,13 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      # 同 native job：setup-android@v3 在当前 runner 镜像上崩溃
+      # （2026-11-15 实测，两个 job 同一步失败），改用 runner 自带
+      # SDK + sdkmanager 直装本项目需要的 platform/build-tools。
+      - name: Install Android SDK components
+        run: |
+          yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
+          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "platforms;android-35" "build-tools;35.0.1"
 
       - name: Unit tests
         run: ./gradlew :app:testDebugUnitTest
