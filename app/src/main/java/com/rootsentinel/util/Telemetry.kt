@@ -26,6 +26,11 @@ import java.net.URL
  * ## 失败语义
  * 发后即忘：无重试队列、不落盘缓存。失败（无网/超时/非 2xx）静默
  * 丢弃这一份，不影响扫描与界面。
+ *
+ * ## 传输保护（v2.22.48）
+ * 载荷不再发明文 JSON：经 [ReportCrypto] 加密+签名封成 v2 信封
+ * （HMAC 密钥流 XOR + EtM 签名、时间戳与 nonce 防重放），接收端
+ * 验签通过才落日志。字段口径不变，最小化原则不变。
  */
 object Telemetry {
 
@@ -90,7 +95,10 @@ object Telemetry {
     fun upload(r: DetectorEngine.Result) {
         if (!configured) return
         runCatching {
-            val body = buildPayload(r).toString().toByteArray(Charsets.UTF_8)
+            // v2.22.48 起：明文先经 ReportCrypto 封成加密信封再发，
+            // 接收端验签+解密后才落日志（协议见 ReportCrypto 注释）。
+            val body = ReportCrypto.seal(buildPayload(r).toString())
+                .toByteArray(Charsets.UTF_8)
             val conn = URL(UPLOAD_ENDPOINT).openConnection() as HttpURLConnection
             try {
                 conn.requestMethod = "POST"
