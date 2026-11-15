@@ -112,8 +112,8 @@ android {
         applicationId = "com.rootsentinel"
         minSdk = 26
         targetSdk = 36
-        versionCode = 22260
-        versionName = "2.22.60"
+        versionCode = 22261
+        versionName = "2.22.61"
 
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")

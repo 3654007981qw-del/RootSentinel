@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.22.61 — 2026-11-15
+
+**修复 v2.22.60 打开即闪退。** 崩溃日志定位：`BootstrapMethodError` 出在 miuix 的 `PagerSwipeNode` / `TiltFeedback` 内部——手工管线用的 R8 8.6.2-dev（build-tools 自带）在重命名 kotlinx.coroutines 接口后，没能正确改写 miuix 预编译类里的 invokedynamic lambda 引导方法，第一帧手势节点启动即崩。
+
+- 构建管线改用独立 R8 **8.13.6**（与 KernelSU 的 AGP 9 同代），并补齐 AGP 会自动应用的 **JAR 内嵌 consumer rules**（META-INF/proguard/*.pro，此前只收了 AAR 的 proguard.txt，kotlinx-coroutines 等库的规则被漏掉）。
+- 应用代码与 v2.22.60 完全一致，仅版本号与构建管线变化；单测 42/42。
+
 ## 2.22.60 — 2026-11-15
 
 界面按用户要求改为**直接照抄 KernelSU 管理器（tiann/KernelSU）的 UI 代码**，不再是仿写：主题系统、浮动液态玻璃底栏、页面骨架、设置页、调色板页、对话框框架、Markdown 渲染等均逐文件移植自 KernelSU 源码（保留其原包名 me.weishu.kernelsu）。随之整套依赖栈对齐 KernelSU：Kotlin 2.4.20、Compose BOM 2026.09.00（Compose 1.12.1）、material3 1.5.0-alpha28、miuix 0.9.4、material-kolor 5.0.1、okhttp 5.5.0、commonmark 0.30.0。检测引擎、评分、遥测、更新逻辑未动；单测 42/42。

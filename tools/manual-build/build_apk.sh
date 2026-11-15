@@ -19,8 +19,8 @@ NDK=$SDK/ndk/27.2.12479018
 JAVAC=/usr/lib/jvm/java-21-openjdk-amd64/bin/javac
 JAVA=/usr/lib/jvm/java-21-openjdk-amd64/bin/java
 APPID=com.rootsentinel
-VCODE=22260
-VNAME=2.22.60
+VCODE=22261
+VNAME=2.22.61
 # 本次构建的签名身份：rsbuild 的 rs.jks（AURORA 侧密钥）。
 # native 基线注入同一证书指纹，保证 I.APK_SIGNATURE 自洽。
 SIGNER_SHA=06377C87CB33D9AB1B0BAE330135AB67404AB96DEEA9F3584DDF2B2FFCDC7A06
@@ -77,6 +77,32 @@ PYEOF
     esac
   done
   ls "$WORK/jars" | wc -l
+  # v2.22.61: harvest consumer rules embedded in plain JARs too
+  # (META-INF/proguard/*.pro, META-INF/com.android.tools/{proguard,r8}/*.pro).
+  # AGP applies these automatically; the manual pipeline previously only
+  # harvested AAR proguard.txt, so e.g. kotlinx-coroutines' rules were lost.
+  rm -rf "$WORK/proguard-jar" && mkdir -p "$WORK/proguard-jar"
+  python3 - "$WORK/jars" "$WORK/proguard-jar" <<'PYEOF2'
+import os, sys, zipfile
+jars_dir, out_dir = sys.argv[1], sys.argv[2]
+n = 0
+for fn in sorted(os.listdir(jars_dir)):
+    if not fn.endswith(".jar"):
+        continue
+    try:
+        z = zipfile.ZipFile(os.path.join(jars_dir, fn))
+    except Exception:
+        continue
+    for name in z.namelist():
+        if (name.startswith("META-INF/proguard/") or
+            name.startswith("META-INF/com.android.tools/proguard/") or
+            name.startswith("META-INF/com.android.tools/r8/")) and name.endswith(".pro"):
+            out = os.path.join(out_dir, fn[:-4] + "__" + os.path.basename(name))
+            with open(out, "wb") as f:
+                f.write(z.read(name))
+            n += 1
+print(f"jar consumer rules harvested: {n}")
+PYEOF2
 }
 
 stage_res() {
@@ -212,7 +238,15 @@ stage_dex() {
             --pg-conf "$SRC/tools/manual-build/r8-extra.pro")
   local p
   for p in "$WORK"/proguard/*.txt; do PG+=(--pg-conf "$p"); done
-  "$JAVA" -Xmx1400m -cp "$BT/lib/d8.jar" com.android.tools.r8.R8 \
+  for p in "$WORK"/proguard-jar/*.pro; do [ -f "$p" ] && PG+=(--pg-conf "$p"); done
+  # v2.22.61: prefer the standalone R8 8.13.6 (tools-r8/r8.jar). The
+  # build-tools-bundled R8 8.6.2-dev mishandles invokedynamic lambda
+  # bootstraps in pre-compiled library classes (miuix) when the SAM
+  # interface (kotlinx.coroutines) is renamed -> BootstrapMethodError
+  # at first frame (v2.22.60 launch crash, verified from logcat).
+  local R8JAR="$BT/lib/d8.jar"
+  [ -f "$RB/tools-r8/r8.jar" ] && R8JAR="$RB/tools-r8/r8.jar"
+  "$JAVA" -Xmx1400m -cp "$R8JAR" com.android.tools.r8.R8 \
     --min-api 26 --lib "$AJAR" "${PG[@]}" \
     --pg-map-output "$WORK/mapping-$VNAME.txt" \
     --output "$WORK/dex-release" "${INPUTS[@]}" > "$WORK/r8.log" 2>&1 \
