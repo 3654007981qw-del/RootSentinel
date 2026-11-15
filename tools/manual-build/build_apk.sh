@@ -222,6 +222,84 @@ stage_verify() {
   unzip -l "$1" | grep -E 'classes.*\.dex|lib/.*\.so|resources.arsc|AndroidManifest'
 }
 
+stage_debug() {
+  # Debug 变体（v2.22.52 起固化）：与 release 只差两处——manifest 的
+  # android:debuggable=true 与 BuildConfig.DEBUG=true/BUILD_TYPE=debug。
+  # Kotlin 类、资源、Native 全部与 release 共用，保证 debug 包测到的
+  # 就是 release 的代码。此前各版靠临时手工拼装，做法没留档、还出过
+  # dex 与 release 逐字节相同（DEBUG 没翻）的事故，故固化为阶段。
+  mkdir -p "$WORK/gen-debug/com/rootsentinel" "$WORK/r-classes-debug"
+  cat > "$WORK/gen-debug/com/rootsentinel/BuildConfig.java" <<EOF
+package com.rootsentinel;
+public final class BuildConfig {
+  public static final boolean DEBUG = true;
+  public static final String APPLICATION_ID = "com.rootsentinel";
+  public static final String BUILD_TYPE = "debug";
+  public static final int VERSION_CODE = $VCODE;
+  public static final String VERSION_NAME = "$VNAME";
+}
+EOF
+  "$JAVAC" -nowarn -cp "$AJAR" -d "$WORK/r-classes-debug" \
+    "$WORK/gen-debug/com/rootsentinel/BuildConfig.java" || return 1
+  rm -rf "$WORK/appjar-debug"
+  mkdir -p "$WORK/appjar-debug"
+  cp -r "$WORK/kotlin-classes/." "$WORK/appjar-debug/"
+  cp -r "$WORK/r-classes/." "$WORK/appjar-debug/"
+  cp "$WORK/r-classes-debug/com/rootsentinel/BuildConfig.class" \
+     "$WORK/appjar-debug/com/rootsentinel/BuildConfig.class" || return 1
+  rm -f "$WORK/app-debug.jar"
+  /usr/lib/jvm/java-21-openjdk-amd64/bin/jar --create \
+    --file "$WORK/app-debug.jar" -C "$WORK/appjar-debug" . || return 1
+  rm -rf "$WORK/dex-debug"
+  mkdir -p "$WORK/dex-debug"
+  local INPUTS=("$WORK/app-debug.jar")
+  local j
+  for j in "$WORK"/jars/*.jar; do INPUTS+=("$j"); done
+  "$JAVA" -Xmx1200m -cp "$BT/lib/d8.jar" com.android.tools.r8.D8 \
+    --min-api 26 --lib "$AJAR" --output "$WORK/dex-debug" \
+    "${INPUTS[@]}" > "$WORK/d8-debug.log" 2>&1 \
+    || { echo "D8 FAILED (debug)"; tail -20 "$WORK/d8-debug.log"; return 1; }
+  [ -f "$WORK/dex-debug/classes.dex" ] || { echo "D8 FAILED: no debug classes.dex"; return 1; }
+  python3 - "$WORK/merged_manifest.xml" "$WORK/merged_manifest_debug.xml" <<'PYEOF' || return 1
+import sys
+s = open(sys.argv[1]).read()
+assert 'android:debuggable' not in s, "manifest already has debuggable"
+s2 = s.replace('<application ', '<application android:debuggable="true" ', 1)
+assert s2 != s, "application tag not found"
+open(sys.argv[2], "w").write(s2)
+print("debug manifest written")
+PYEOF
+  local RARGS=()
+  local z
+  for z in "$WORK"/resz/*.zip; do
+    [ "$z" = "$WORK/resz/app.zip" ] && continue
+    RARGS+=(-R "$z")
+  done
+  "$BT/aapt2" link -o "$WORK/linked-debug.apk" -I "$AJAR" \
+    --manifest "$WORK/merged_manifest_debug.xml" \
+    --output-text-symbols "$WORK/symbols-debug.txt" \
+    --auto-add-overlay \
+    --min-sdk-version 26 --target-sdk-version 36 \
+    --version-code $VCODE --version-name $VNAME \
+    "$WORK/resz/app.zip" "${RARGS[@]}" || return 1
+  rm -f "$WORK/rs-debug.apk"
+  cp "$WORK/linked-debug.apk" "$WORK/rs-debug.apk"
+  python3 "$RB/package_apk.py" debug || return 1
+  "$BT/zipalign" -f -p 4 "$WORK/rs-debug.apk" "$WORK/rs-debug-aligned.apk" || return 1
+  "$BT/apksigner" sign --ks "$KS" --ks-pass file:"$KSPASS" \
+    --out "$WORK/RootSentinel-v$VNAME-debug.apk" "$WORK/rs-debug-aligned.apk" || return 1
+  ls -la "$WORK/RootSentinel-v$VNAME-debug.apk"
+  stage_gate "$WORK/RootSentinel-v$VNAME-debug.apk" || return 1
+  # 注意：badging 输出必须先捕获再 grep——pipefail 下 grep -q 提前
+  # 退出会让 aapt2 吃 SIGPIPE、管道返回非零，误报 GATE FAIL
+  # （2.22.51 构建时 stage_gate 已踩过一次）。
+  local dbg_badging
+  dbg_badging=$("$BT/aapt2" dump badging "$WORK/RootSentinel-v$VNAME-debug.apk") || return 1
+  grep -q 'application-debuggable' <<<"$dbg_badging" \
+    || { echo "GATE FAIL: debug apk is not debuggable"; return 1; }
+  echo "DEBUG OK: debuggable + BuildConfig.DEBUG=true at $VNAME"
+}
+
 case "${1:-}" in
   prep) stage_prep ;;
   res) stage_res ;;
@@ -230,7 +308,8 @@ case "${1:-}" in
   kotlin) stage_kotlin ;;
   dex) stage_dex ;;
   pkg) stage_pkg ;;
+  debug) stage_debug ;;
   verify) stage_verify "${2:-}" ;;
   gate) stage_gate "${2:-}" ;;
-  *) echo "usage: $0 prep|res|rjava|native|kotlin|dex|pkg|verify <apk>" ;;
+  *) echo "usage: $0 prep|res|rjava|native|kotlin|dex|pkg|debug|verify <apk>" ;;
 esac
