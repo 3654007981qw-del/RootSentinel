@@ -1,6 +1,7 @@
 package com.rootsentinel
 
 import com.rootsentinel.util.Updater
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -92,5 +93,55 @@ class UpdaterTest {
             Updater.decide(Updater.SourceOutcome.Failed, Updater.SourceOutcome.Failed)
                 is Updater.CheckResult.Failed,
         )
+    }
+
+    // ---- v2.22.52 多源候选与分片计划 ----
+
+    @Test
+    fun candidatesOrderGithubMirrorsGitee() {
+        val gh = "https://github.com/AURORA-0711/RootSentinel/releases/download/v1/x.apk"
+        val gt = "https://gitee.com/AURORAqw/RootSentinel/releases/download/v1/x.apk"
+        val c = Updater.candidates(gh, gt)
+        assertEquals(gh, c.first())
+        assertEquals(gt, c.last())
+        // 直连 + 3 个镜像 + Gitee，共 5 个，且镜像都是前缀拼接
+        assertEquals(5, c.size)
+        assertTrue(c.subList(1, 4).all { it.endsWith(gh) && it != gh })
+    }
+
+    @Test
+    fun candidatesHandleNulls() {
+        assertEquals(4, Updater.candidates("https://github.com/x", null).size)
+        assertEquals(
+            listOf("https://gitee.com/x"),
+            Updater.candidates(null, "https://gitee.com/x"),
+        )
+        assertTrue(Updater.candidates(null, null).isEmpty())
+    }
+
+    @Test
+    fun chunkPlanCoversExactly() {
+        val plan = Updater.chunkPlan(10, 4)
+        assertEquals(4, plan.size)
+        assertEquals(0L, plan.first().first)
+        assertEquals(9L, plan.last().last)
+        // 连续不重叠，总长恰好 10
+        var covered = 0L
+        for (i in plan.indices) {
+            if (i > 0) assertEquals(plan[i - 1].last + 1, plan[i].first)
+            covered += plan[i].last - plan[i].first + 1
+        }
+        assertEquals(10L, covered)
+    }
+
+    @Test
+    fun chunkPlanEdgeCases() {
+        assertEquals(3, Updater.chunkPlan(3, 4).size)
+        assertEquals(1, Updater.chunkPlan(1, 4).size)
+        assertTrue(Updater.chunkPlan(0, 4).isEmpty())
+        assertTrue(Updater.chunkPlan(-5, 4).isEmpty())
+        val big = Updater.chunkPlan(16_233_586, 4)
+        assertEquals(4, big.size)
+        assertEquals(16_233_585L, big.last().last)
     }
 }

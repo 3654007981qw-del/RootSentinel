@@ -12,9 +12,12 @@ import com.rootsentinel.RootSentinelVersion
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
+import java.io.RandomAccessFile
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * 应用内更新（v2.22.47）。
@@ -55,7 +58,57 @@ object Updater {
         /** 发布接口给出的 asset SHA-256（GitHub 有，Gitee 可能没有） */
         val sha256: String?,
         val source: String,
+        /**
+         * 全部候选下载地址（v2.22.52 多源切换）：顺序为 GitHub 直连
+         * → 公益镜像 ×3 → Gitee。下载引擎逐个尝试、自动切换；
+         * apkUrl 恒为第一个候选（官方直链），供展示与复制/浏览器
+         * 兜底使用。候选指向的都是同一个文件，最终完整性由安装前
+         * 的 SHA-256/包名/签名三重校验保证，镜像只能影响速度。
+         */
+        val candidates: List<String> = listOf(apkUrl),
     )
+
+    /** GitHub 公益加速镜像前缀（v2.22.52）：完整 GitHub 链接拼在其后。 */
+    private val MIRROR_PREFIXES = listOf(
+        "https://gh-proxy.com/",
+        "https://ghfast.top/",
+        "https://ghproxy.net/",
+    )
+
+    /** 单个 GitHub 地址派生的镜像地址列表（纯函数，可单测）。 */
+    fun mirrorUrls(githubUrl: String): List<String> =
+        MIRROR_PREFIXES.map { it + githubUrl }
+
+    /**
+     * 候选下载列表（纯函数，可单测）：GitHub 直连 → 镜像 → Gitee，
+     * 去重保序。任一参数为 null 表示该源没有可用地址。
+     */
+    fun candidates(githubUrl: String?, giteeUrl: String?): List<String> =
+        buildList {
+            if (githubUrl != null) {
+                add(githubUrl)
+                addAll(mirrorUrls(githubUrl))
+            }
+            if (giteeUrl != null) add(giteeUrl)
+        }.distinct()
+
+    /**
+     * 分片计划（纯函数，可单测）：把 [0, total) 切成至多 chunks 段
+     * 连续不重叠的闭区间。total <= 0 返回空表。
+     */
+    fun chunkPlan(total: Long, chunks: Int): List<LongRange> {
+        if (total <= 0 || chunks <= 0) return emptyList()
+        val size = (total + chunks - 1) / chunks
+        val out = ArrayList<LongRange>()
+        var i = 0
+        while (true) {
+            val s = i * size
+            if (s >= total) break
+            out.add(s..minOf(s + size, total) - 1)
+            i++
+        }
+        return out
+    }
 
     /** 三段式版本号数值比较：remote > current 才算新版。解析失败按不新处理。 */
     fun isNewer(remote: String, current: String): Boolean {
@@ -107,9 +160,46 @@ object Updater {
     /** 查新版：GitHub 优先，找到就不问 Gitee。阻塞调用，走 IO 线程。 */
     fun check(): CheckResult {
         val gh = checkFrom(GITHUB_LATEST, "GitHub")
-        if (gh is SourceOutcome.Found) return CheckResult.Found(gh.info)
+        if (gh is SourceOutcome.Found) {
+            // v2.22.52：GitHub 命中后顺手（尽力而为，短超时）取一次
+            // Gitee 同版本资产地址，追加为下载候选的最后一环。
+            // 取不到不影响结论，decide() 的三态语义不变。
+            val gtUrl = giteeAssetUrl(gh.info.versionName)
+            val info = if (gtUrl != null) {
+                gh.info.copy(candidates = candidates(gh.info.apkUrl, gtUrl))
+            } else {
+                gh.info
+            }
+            return CheckResult.Found(info)
+        }
         val gt = checkFrom(GITEE_LATEST, "Gitee")
         return decide(gh, gt)
+    }
+
+    /** Gitee 上指定版本（tag，不带 v）的 release APK 地址；任何异常返回 null。 */
+    private fun giteeAssetUrl(versionName: String): String? {
+        val conn = try {
+            openGet(GITEE_LATEST, shortTimeout = true)
+        } catch (t: Throwable) {
+            return null
+        }
+        try {
+            if (conn.responseCode != 200) return null
+            val json = JSONObject(conn.inputStream.bufferedReader().readText())
+            if (json.optString("tag_name").removePrefix("v") != versionName) return null
+            val assets = json.optJSONArray("assets") ?: return null
+            for (i in 0 until assets.length()) {
+                val a = assets.optJSONObject(i) ?: continue
+                if (a.optString("name").endsWith("-release.apk")) {
+                    return a.optString("browser_download_url").ifEmpty { null }
+                }
+            }
+            return null
+        } catch (t: Throwable) {
+            return null
+        } finally {
+            conn.disconnect()
+        }
     }
 
     private fun checkFrom(api: String, source: String): SourceOutcome {
@@ -136,15 +226,27 @@ object Updater {
             val a = apk ?: return SourceOutcome.NoUpdate
             val url = a.optString("browser_download_url")
             if (url.isEmpty()) return SourceOutcome.NoUpdate
+            // v2.22.52：候选列表在结论产生处就建好。GitHub 源直接
+            // 派生镜像候选（Gitee 地址由 check() 命中后补取）；
+            // Gitee 源则按本仓库固定的发布地址规律反推 GitHub
+            // 直链（/releases/download/v<tag>/<资产名>），使候选
+            // 顺序与 GitHub 命中时一致。
+            val cands = if (source == "GitHub") {
+                candidates(url, null)
+            } else {
+                val canonical = "$REPO_URL/releases/download/v$tag/${a.optString("name")}"
+                candidates(canonical, url)
+            }
             return SourceOutcome.Found(
                 UpdateInfo(
                     versionName = tag,
                     notes = json.optString("body"),
-                    apkUrl = url,
+                    apkUrl = cands.first(),
                     apkSize = a.optLong("size"),
                     sha256 = a.optString("digest").removePrefix("sha256:")
                         .ifEmpty { null },
                     source = source,
+                    candidates = cands,
                 ),
             )
         } catch (t: Throwable) {
@@ -154,19 +256,30 @@ object Updater {
         }
     }
 
-    private fun openGet(url: String): HttpURLConnection {
+    private fun openGet(url: String, shortTimeout: Boolean = false): HttpURLConnection {
         val conn = URL(url).openConnection() as HttpURLConnection
-        conn.connectTimeout = 10_000
-        conn.readTimeout = 15_000
+        conn.connectTimeout = if (shortTimeout) 5_000 else 10_000
+        conn.readTimeout = if (shortTimeout) 5_000 else 15_000
         conn.setRequestProperty("User-Agent", "RootSentinel/${RootSentinelVersion.NAME}")
         conn.setRequestProperty("Accept", "application/json")
         return conn
     }
 
     /**
-     * 下载 APK 到 dest，边下边算 SHA-256。阻塞调用，走 IO 线程。
+     * 下载 APK 到 dest（v2.22.52 多源 + 分片续传）。阻塞调用，走 IO 线程。
+     *
+     * 流程：候选源（GitHub 直连 → 镜像 → Gitee）任一支持 Range 时
+     * 走分片模式——文件切 4 段并行下载，每段落盘为 part 文件，
+     * 中断后凭已有 part 长度断点续传；某段在某个源失败自动换下
+     * 一个源续下同一段（各源是同一文件，字节区间可跨源拼）。
+     * 所有源都不支持 Range 时退回单流模式，同样逐源切换。
+     * 完成后拼装并算 SHA-256；接口公布了 digest 时在此先比对
+     * 一次，不一致删文件报错（防续传残段污染导致的死循环重试）。
+     * 取消时保留 part 文件，下次重试即续传；dest 只在拼装成功
+     * 后出现。
+     *
      * @param onProgress (已下载字节, 总字节)；总字节未知时为 -1
-     * @param isCancelled 返回 true 时中止并删半成品
+     * @param isCancelled 返回 true 时中止（分片保留）
      * @return 实际文件的 SHA-256（hex 小写）
      */
     fun download(
@@ -176,7 +289,287 @@ object Updater {
         isCancelled: () -> Boolean,
     ): String {
         dest.parentFile?.mkdirs()
-        var url = info.apkUrl
+        val urls = info.candidates.ifEmpty { listOf(info.apkUrl) }
+        val total = resolveTotal(info, urls)
+        if (total > MAX_APK_BYTES) {
+            throw IllegalStateException("安装包体积异常（$total 字节），已中止下载")
+        }
+        if (total > 0) {
+            val sha = downloadChunked(info, urls, total, dest, onProgress, isCancelled)
+            if (sha != null) return sha
+            // 所有源都不支持分片 → 落单流模式
+        }
+        return downloadSingle(info, urls, dest, onProgress, isCancelled)
+    }
+
+    /** 总字节数：接口给的 size 优先；没有就用 Range 探测第一个可用源。 */
+    private fun resolveTotal(info: UpdateInfo, urls: List<String>): Long {
+        if (info.apkSize > 0) return info.apkSize
+        for (u in urls) {
+            val r = openRange(u, 0, 0)
+            when (r) {
+                is RangeResult.Part -> {
+                    val t = r.total
+                    r.close()
+                    if (t > 0) return t
+                }
+                is RangeResult.Full -> {
+                    val t = r.contentLength
+                    r.close()
+                    if (t > 0) return t
+                }
+                is RangeResult.Fail -> Unit
+            }
+        }
+        return -1
+    }
+
+    private sealed interface RangeResult {
+        fun close()
+
+        /** 206：conn 已定位到请求的字节区间，total 为文件总长（-1 未知） */
+        class Part(val conn: HttpURLConnection, val total: Long) : RangeResult {
+            override fun close() = conn.disconnect()
+        }
+
+        /** 200：源不理会 Range，conn 是完整文件流 */
+        class Full(val conn: HttpURLConnection, val contentLength: Long) : RangeResult {
+            override fun close() = conn.disconnect()
+        }
+
+        class Fail(val code: Int) : RangeResult {
+            override fun close() = Unit
+        }
+    }
+
+    /** 发一个带 Range 的 GET，手动跟随重定向（每次都带 Range 头）。 */
+    private fun openRange(url: String, start: Long, end: Long): RangeResult {
+        var current = url
+        var redirects = 0
+        while (true) {
+            val conn = try {
+                openGet(current)
+            } catch (t: Throwable) {
+                return RangeResult.Fail(-1)
+            }
+            conn.instanceFollowRedirects = false
+            conn.setRequestProperty("Range", "bytes=$start-$end")
+            val code = try {
+                conn.responseCode
+            } catch (t: Throwable) {
+                conn.disconnect()
+                return RangeResult.Fail(-1)
+            }
+            when {
+                code in intArrayOf(301, 302, 303, 307, 308) -> {
+                    val loc = conn.getHeaderField("Location")
+                    conn.disconnect()
+                    if (loc.isNullOrEmpty() || ++redirects > 5) {
+                        return RangeResult.Fail(code)
+                    }
+                    current = loc
+                }
+                code == 206 -> {
+                    val cr = conn.getHeaderField("Content-Range")
+                    val t = cr?.substringAfterLast('/')?.toLongOrNull() ?: -1
+                    return RangeResult.Part(conn, t)
+                }
+                code == 200 -> return RangeResult.Full(conn, conn.contentLengthLong)
+                else -> {
+                    conn.disconnect()
+                    return RangeResult.Fail(code)
+                }
+            }
+        }
+    }
+
+    /**
+     * 分片模式。返回拼装文件的 SHA-256；若所有源都不支持 Range
+     * 返回 null 让调用方退回单流。失败抛异常，取消抛
+     * InterruptedException（part 保留）。
+     */
+    private fun downloadChunked(
+        info: UpdateInfo,
+        urls: List<String>,
+        total: Long,
+        dest: File,
+        onProgress: (Long, Long) -> Unit,
+        isCancelled: () -> Boolean,
+    ): String? {
+        val plan = chunkPlan(total, 4)
+        if (plan.isEmpty()) return null
+        val partsDir = File(dest.parentFile, dest.name + ".parts")
+        partsDir.mkdirs()
+        val partFiles = plan.mapIndexed { i, _ -> File(partsDir, "part-$i") }
+        // 已有 part 的有效长度 = 续传基线；超长视为污染，删掉重下
+        val doneBytes = AtomicLong(0)
+        plan.forEachIndexed { i, range ->
+            val len = partFiles[i].length()
+            val chunkLen = range.last - range.first + 1
+            when {
+                len in 1..chunkLen -> doneBytes.addAndGet(len)
+                len > chunkLen -> partFiles[i].delete()
+            }
+        }
+        onProgress(doneBytes.get(), total)
+        val noRange = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+        val pool = Executors.newFixedThreadPool(plan.size.coerceAtMost(4))
+        try {
+            val futures = plan.mapIndexed { i, range ->
+                pool.submit<Unit> {
+                    downloadChunk(urls, range, partFiles[i], noRange, doneBytes, total, onProgress, isCancelled)
+                }
+            }
+            while (futures.any { !it.isDone }) {
+                if (isCancelled()) throw InterruptedException("已取消")
+                onProgress(doneBytes.get(), total)
+                Thread.sleep(200)
+            }
+            futures.forEach { it.get() } // 失败在此以 ExecutionException 抛出
+        } catch (e: InterruptedException) {
+            pool.shutdownNow()
+            throw e
+        } catch (e: Exception) {
+            pool.shutdownNow()
+            if (noRange.containsAll(urls)) return null
+            val cause = (e as? java.util.concurrent.ExecutionException)?.cause ?: e
+            if (cause is InterruptedException) throw cause
+            throw IllegalStateException(cause.message ?: "下载失败，请检查网络后重试")
+        }
+        pool.shutdown()
+        // 拼装 + 算哈希
+        val digest = MessageDigest.getInstance("SHA-256")
+        var assembled = 0L
+        FileOutputStream(dest).use { out ->
+            val buf = ByteArray(64 * 1024)
+            for (f in partFiles) {
+                f.inputStream().use { input ->
+                    while (true) {
+                        val n = input.read(buf)
+                        if (n < 0) break
+                        out.write(buf, 0, n)
+                        digest.update(buf, 0, n)
+                        assembled += n
+                    }
+                }
+            }
+        }
+        if (assembled != total) {
+            dest.delete()
+            throw IllegalStateException("下载不完整（$assembled/$total 字节），请重试")
+        }
+        partsDir.deleteRecursively()
+        val sha = digest.digest().joinToString("") { "%02x".format(it) }
+        val expected = info.sha256
+        if (expected != null && !expected.equals(sha, ignoreCase = true)) {
+            dest.delete()
+            throw IllegalStateException("下载内容与发布哈希不一致，已删除，请重试")
+        }
+        onProgress(total, total)
+        return sha
+    }
+
+    /** 下载单个分片：按候选顺序逐源续下同一字节区间。 */
+    private fun downloadChunk(
+        urls: List<String>,
+        range: LongRange,
+        part: File,
+        noRange: MutableSet<String>,
+        doneBytes: AtomicLong,
+        total: Long,
+        onProgress: (Long, Long) -> Unit,
+        isCancelled: () -> Boolean,
+    ) {
+        val chunkLen = range.last - range.first + 1
+        var have = if (part.exists()) part.length() else 0L
+        if (have > chunkLen) {
+            part.delete()
+            have = 0
+        }
+        var lastError: Exception? = null
+        while (have < chunkLen) {
+            if (isCancelled()) throw InterruptedException("已取消")
+            var progressed = false
+            for (u in urls) {
+                if (have >= chunkLen) break
+                if (noRange.contains(u)) continue
+                when (val r = openRange(u, range.first + have, range.last)) {
+                    is RangeResult.Part -> {
+                        try {
+                            r.conn.inputStream.use { input ->
+                                RandomAccessFile(part, "rw").use { raf ->
+                                    raf.seek(have)
+                                    val buf = ByteArray(64 * 1024)
+                                    while (have < chunkLen) {
+                                        if (isCancelled()) {
+                                            throw InterruptedException("已取消")
+                                        }
+                                        val n = input.read(
+                                            buf, 0,
+                                            minOf(buf.size.toLong(), chunkLen - have).toInt(),
+                                        )
+                                        if (n < 0) break
+                                        raf.write(buf, 0, n)
+                                        have += n
+                                        doneBytes.addAndGet(n.toLong())
+                                        progressed = true
+                                        onProgress(doneBytes.get(), total)
+                                    }
+                                }
+                            }
+                        } catch (e: InterruptedException) {
+                            throw e
+                        } catch (e: Exception) {
+                            lastError = e
+                        } finally {
+                            r.close()
+                        }
+                    }
+                    is RangeResult.Full -> {
+                        r.close()
+                        noRange.add(u)
+                    }
+                    is RangeResult.Fail -> {
+                        lastError = IllegalStateException("HTTP ${r.code}")
+                    }
+                }
+            }
+            if (!progressed && have < chunkLen) {
+                throw lastError ?: IllegalStateException("分片下载失败")
+            }
+        }
+    }
+
+    /** 单流模式（源不支持 Range 时）：逐源尝试完整下载，任一成功即返回。 */
+    private fun downloadSingle(
+        info: UpdateInfo,
+        urls: List<String>,
+        dest: File,
+        onProgress: (Long, Long) -> Unit,
+        isCancelled: () -> Boolean,
+    ): String {
+        var lastError: Exception? = null
+        for (u in urls) {
+            try {
+                return downloadSingleFrom(info, u, dest, onProgress, isCancelled)
+            } catch (e: InterruptedException) {
+                throw e
+            } catch (e: Exception) {
+                lastError = e
+                dest.delete()
+            }
+        }
+        throw lastError ?: IllegalStateException("所有下载源均失败")
+    }
+
+    private fun downloadSingleFrom(
+        info: UpdateInfo,
+        startUrl: String,
+        dest: File,
+        onProgress: (Long, Long) -> Unit,
+        isCancelled: () -> Boolean,
+    ): String {
+        var url = startUrl
         var redirects = 0
         while (true) {
             val conn = openGet(url)
@@ -197,7 +590,7 @@ object Updater {
             } else {
                 info.apkSize
             }
-            // v2.22.50（第六轮审查 #21）：下载体积硬帽。发布包约 16 MB，
+            // 下载体积硬帽（v2.22.50，第六轮审查 #21）：发布包约 16 MB，
             // 64 MB 给足余量；超限说明来源异常，直接中止——后面还有
             // SHA/包名/签名三重校验，这里是纵深防御的第一道。
             if (total > MAX_APK_BYTES) {
@@ -219,7 +612,6 @@ object Updater {
                         digest.update(buf, 0, n)
                         done += n
                         if (done > MAX_APK_BYTES) {
-                            // 实际流量超限（Content-Length 缺失/造假时）
                             dest.delete()
                             throw IllegalStateException("安装包体积异常，已中止下载")
                         }

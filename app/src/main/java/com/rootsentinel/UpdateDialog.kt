@@ -1,9 +1,16 @@
 package com.rootsentinel
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.widget.Toast
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -261,6 +268,7 @@ fun UpdateDialog(
                             PrimaryButton("立即更新") {
                                 controller.startDownload(scope, context)
                             }
+                            FallbackRow(inf)
                             SecondaryText("稍后再说") { controller.dismiss() }
                         }
                     }
@@ -310,6 +318,10 @@ fun UpdateDialog(
                             fontSize = 13.sp,
                             color = c.onBackgroundVariant,
                         )
+                        if (inf != null) {
+                            Spacer(Modifier.height(8.dp))
+                            FallbackRow(inf)
+                        }
                         Spacer(Modifier.height(16.dp))
                         PrimaryButton("关闭") { controller.dismiss() }
                     }
@@ -317,6 +329,50 @@ fun UpdateDialog(
                     UpdateController.Phase.Idle -> Unit
                 }
             }
+        }
+    }
+}
+
+/**
+ * 下载兜底行（v2.22.52）：App 内下载走不通时，用户可以复制官方
+ * 直链自己想办法，或直接用浏览器打开下载。链接恒为 GitHub 官方
+ * 资产地址（UpdateInfo.apkUrl），不经任何镜像。
+ */
+@Composable
+private fun FallbackRow(inf: Updater.UpdateInfo) {
+    val c = MiuixTheme.colorScheme
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceEvenly,
+    ) {
+        Box(
+            Modifier
+                .clickable {
+                    val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE)
+                        as ClipboardManager
+                    cm.setPrimaryClip(ClipData.newPlainText("RootSentinel 更新包", inf.apkUrl))
+                    Toast.makeText(ctx, "已复制下载链接", Toast.LENGTH_SHORT).show()
+                }
+                .padding(vertical = 10.dp, horizontal = 8.dp),
+        ) {
+            Text("复制下载链接", fontSize = 13.sp, color = c.onBackgroundVariant)
+        }
+        Box(
+            Modifier
+                .clickable {
+                    try {
+                        ctx.startActivity(
+                            Intent(Intent.ACTION_VIEW, Uri.parse(inf.apkUrl))
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                        )
+                    } catch (e: Exception) {
+                        Toast.makeText(ctx, "没有可用的浏览器", Toast.LENGTH_SHORT).show()
+                    }
+                }
+                .padding(vertical = 10.dp, horizontal = 8.dp),
+        ) {
+            Text("浏览器打开", fontSize = 13.sp, color = c.onBackgroundVariant)
         }
     }
 }
