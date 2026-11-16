@@ -18,8 +18,9 @@ import com.rootsentinel.model.Verdict
  * 因为 PackageManager 走 Binder，SELinux 的文件规则完全管不到它。
  * 「native 说干净、Java 说看到管理器」这种矛盾本身就是最强的隐藏证据。
  *
- * v2 包第三节要求：同一包名必须在 5 个不同接口上都问一遍，
- * 结果与异常类型都必须一致。
+ * v2 包第三节要求：同一包名必须在多个不同接口上都问一遍，
+ * 结果与异常类型都必须一致。v2.22.73 起扩到 9 个 Binder 通道
+ * + 1 个文件系统 stat 通道（非对称使用，见 checkPackages）。
  */
 class JavaDetectors(private val context: Context) {
 
@@ -31,6 +32,7 @@ class JavaDetectors(private val context: Context) {
         "io.github.huskydg.magisk",
         "me.weishu.kernelsu",
         "com.sukisu.ultra",
+        "com.sukisu.nova",
         "io.milksu.manager",
         "me.inkdye.vivoksu",
         "com.rifsxd.ksunext",
@@ -110,12 +112,80 @@ class JavaDetectors(private val context: Context) {
             }.getOrNull() != null
             observations += "launchIntent" to if (byIntent) "resolved" else "null"
 
-            val hits = listOf(byInfo, byApp, byUid, inList, byIntent).count { it }
+            // 接口 6: resolveActivity（MAIN 动作 + setPackage；比 launchIntent
+            // 宽，不要求 LAUNCHER 类别，走 PMS 的意图解析表）
+            val byActivity = runCatching {
+                pm.resolveActivity(Intent(Intent.ACTION_MAIN).setPackage(pkg), 0)
+            }.getOrNull() != null
+            observations += "resolveActivity" to if (byActivity) "resolved" else "null"
+
+            // 接口 7: queryIntentActivities（与 resolveActivity 是两个 PMS 方法，
+            // 钩子常只补其中一个）
+            val byQuery = runCatching {
+                pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).setPackage(pkg), 0)
+            }.getOrNull()?.isNotEmpty() == true
+            observations += "queryActivities" to if (byQuery) "found" else "absent"
+
+            // 接口 8: getResourcesForApplication（资源加载路径，
+            // 与包信息查询是 PMS 里两条不同的代码路径）
+            val byResources = runCatching {
+                pm.getResourcesForApplication(pkg)
+            }.fold(
+                onSuccess = { observations += "resources" to "found"; true },
+                onFailure = { e ->
+                    observations += "resources" to (e.javaClass.simpleName)
+                    false
+                },
+            )
+
+            // 接口 9: getPackagesForUid 反查（先由接口 3 拿到 uid 再反查包名；
+            // 正反两个方向的映射在 PMS 里分开维护，钩子容易只改一个方向）
+            var byUidReverse = false
+            if (byUid) {
+                val uid = runCatching { pm.getPackageUid(pkg, 0) }.getOrNull()
+                if (uid != null) {
+                    byUidReverse = runCatching {
+                        pm.getPackagesForUid(uid)?.contains(pkg) == true
+                    }.getOrDefault(false)
+                    observations += "uidReverse" to if (byUidReverse) "found" else "absent"
+                }
+            }
+
+            // 通道 10: /data/data/<pkg> 的 stat（文件系统通道，非 Binder）。
+            // 非对称使用：stat 到只作为「存在」的独立旁证 —— 某些机型连
+            // 穿越 /data/data 都被挡，stat 不到不能反推「没装」，
+            // 所以不计入 hits/一致性，只在 PM 全盲而它可见时单独立案。
+            val byDataDir = runCatching {
+                java.io.File("/data/data/$pkg").exists()
+            }.getOrDefault(false)
+            observations += "dataDirStat" to if (byDataDir) "found" else "absent"
+
+            val hits = listOf(
+                byInfo, byApp, byUid, inList, byIntent, byActivity, byQuery,
+                byResources, byUidReverse,
+            ).count { it }
+
+            // PM 九个通道全盲、文件系统却看得见 → 同样是针对性过滤
+            if (hits == 0 && byDataDir) {
+                out += Evidence(
+                    id = "X.PKG_INCONSISTENT",
+                    category = Category.CROSSCHECK,
+                    severity = Severity.CRITICAL,
+                    confidence = Confidence.HIGH,
+                    verdict = Verdict.HIT,
+                    title = "包管理接口全盲但数据目录存在: $pkg",
+                    detail = "九个 Binder 通道均不可见，/data/data 数据目录却存在 → 存在针对性过滤（HMA/Shamiko 类）",
+                    vectors = observations.map { "${it.first}=${it.second}" },
+                    fpNote = "",
+                )
+                continue
+            }
 
             if (hits == 0) continue
 
-            // 不一致 = 高置信度隐藏证据
-            val consistent = (byInfo == byApp) && (byInfo == inList)
+            // 不一致 = 高置信度隐藏证据（核心四通道必须同结论；
+            // 其余通道只进观测向量，避免无 MAIN 活动的包误报矛盾）
+            val consistent = (byInfo == byApp) && (byInfo == inList) && (byInfo == byResources)
             val e = if (consistent) {
                 Evidence(
                     id = "B.PKG_VISIBLE",
@@ -126,7 +196,7 @@ class JavaDetectors(private val context: Context) {
                     confidence = Confidence.HIGH,
                     verdict = Verdict.HIT,
                     title = "管理器包可见: $pkg",
-                    detail = "五个接口一致返回结果",
+                    detail = "核心接口一致返回结果（共 ${observations.size} 个通道观测）",
                     fpNote = "包可见只证明「装了这个 App」，"
                         + "不证明设备已 root —— 必须结合 A.SU_PATH / A.DATA_ADB 判断",
                     vectors = observations.map { "${it.first}=${it.second}" },

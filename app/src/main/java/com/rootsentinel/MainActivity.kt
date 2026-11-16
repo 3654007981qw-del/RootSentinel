@@ -138,6 +138,15 @@ class MainActivity : ComponentActivity() {
                 com.rootsentinel.util.CrashReporter.uploadPending(application)
             }
         }.start()
+        // v2.22.73: 上次崩过且存的外壳是 SukiSU → 本次启动强制走
+        // KernelSU 外壳（只影响这一次，设置不动），先把崩溃日志
+        // 送出去、断掉崩溃循环；日志送达后文件删除，下次恢复原样。
+        if (com.rootsentinel.util.CrashReporter.hasPending(application)) {
+            val sp2 = application.getSharedPreferences("rs_settings", android.content.Context.MODE_PRIVATE)
+            if (sp2.getString("uiSkin", "ksu") == "sukisu") {
+                com.rootsentinel.data.SkinBridge.forceKsuOnce = true
+            }
+        }
         enableEdgeToEdge()
         val auto = intent?.getStringExtra("auto")
         val tab = intent?.getIntExtra("tab", 0) ?: 0
@@ -645,7 +654,7 @@ fun RootApp(auto: String?, initialTab: Int, initialSub: String?) {
                             SubPage.NONE -> Unit
                         }
                     }
-                } else if (settings.uiSkin == "sukisu") {
+                } else if (settings.uiSkin == "sukisu" && !com.rootsentinel.data.SkinBridge.forceKsuOnce) {
                     // v2.22.71: SukiSU-Nova shell (vendored UI, RS pager data).
                     SukisuShell(
                         rsPageScale = settings.pageScale,

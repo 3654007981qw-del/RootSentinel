@@ -49,6 +49,9 @@ object CrashReporter {
         }
     }
 
+    /** 是否有待发的崩溃文件（= 上次运行崩过）。同步、极轻，可在启动早期调用。 */
+    fun hasPending(app: Application): Boolean = pendingFile(app).exists()
+
     private fun pendingFile(app: Application): File =
         File(File(app.filesDir, "crash").apply { mkdirs() }, FILE_NAME)
 

@@ -13,4 +13,14 @@ import androidx.compose.runtime.setValue
  */
 object SkinBridge {
     var uiSkin by mutableStateOf("ksu")
+
+    /**
+     * v2.22.73 one-launch rescue: when the previous launch crashed
+     * (a pending crash file exists) and the persisted skin is the
+     * SukiSU shell, RootApp renders the KernelSU shell for THIS launch
+     * only — the persisted setting is untouched, the crash upload gets
+     * a crash-free launch to complete in, and the crash loop is broken.
+     * Set by MainActivity.onCreate before setContent.
+     */
+    var forceKsuOnce by mutableStateOf(false)
 }
