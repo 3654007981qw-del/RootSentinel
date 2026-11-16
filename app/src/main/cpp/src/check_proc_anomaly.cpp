@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
+#include <sys/sysinfo.h>
 #include <string>
 #include <vector>
 
@@ -124,7 +125,19 @@ void checkProcAnomaly(ScanReport& r) {
                               Severity::LOW, RSs("CLOCK_BOOTTIME 不可用")));
         } else {
             const auto uptime = readFile(RSs("/proc/uptime"), 4096);
-            const double up = std::atof(uptime.c_str());
+            double up = std::atof(uptime.c_str());
+            // v2.22.66 底层通道：/proc/uptime 被拒时用 sysinfo() 的
+            // uptime——同一开机时钟（含 suspend），整数秒的截断误差
+            // 小于 1 秒，远在 2 秒判定带宽之内。来源记入 vector，
+            // X.PROC_SELECTIVE 的相关性输入不丢（它读的是文件本身）。
+            bool upViaSysinfo = false;
+            if (up <= 0.0) {
+                struct sysinfo si {};
+                if (sysinfo(&si) == 0 && si.uptime > 0) {
+                    up = (double)si.uptime;
+                    upViaSysinfo = true;
+                }
+            }
 
             if (up <= 0.0) {
                 r.add(makeUnknown(RSs("X.CLOCK_SKEW"), Category::CROSSCHECK,
@@ -140,6 +153,7 @@ void checkProcAnomaly(ScanReport& r) {
                     Evidence e = makePass(RSs("X.CLOCK_SKEW"), Category::CROSSCHECK,
                                           RSs("CLOCK_BOOTTIME 与 uptime 一致"));
                     e.addVector(RSs("skew_s"), buf);
+                    if (upViaSysinfo) e.addVector(RSs("source"), RSs("sysinfo"));
                     r.add(std::move(e));
                 } else if (skew <= 60.0) {
                     Evidence e = makeUnknown(RSs("X.CLOCK_SKEW"), Category::CROSSCHECK,
@@ -166,8 +180,24 @@ void checkProcAnomaly(ScanReport& r) {
     {
         const auto la = trim(readFile(RSs("/proc/loadavg"), 4096));
         if (la.empty()) {
-            r.add(makeUnknown(RSs("X.LOADAVG"), Category::CROSSCHECK,
-                              Severity::LOW, RSs("/proc/loadavg 不可读")));
+            // v2.22.66 底层通道：sysinfo().loads 就是 /proc/loadavg
+            // 打印的那三个内核负载值（定点数，÷65536），文件被拒
+            // 时从系统调用直接取，语义不变。
+            struct sysinfo si {};
+            if (sysinfo(&si) == 0) {
+                char buf[96];
+                std::snprintf(buf, sizeof(buf), "%.2f %.2f %.2f",
+                              si.loads[0] / 65536.0, si.loads[1] / 65536.0,
+                              si.loads[2] / 65536.0);
+                Evidence e = makePass(RSs("X.LOADAVG"), Category::CROSSCHECK,
+                                      RSs("loadavg 已读取（sysinfo）"));
+                e.addVector(RSs("raw"), RSs(buf));
+                e.addVector(RSs("source"), RSs("sysinfo"));
+                r.add(std::move(e));
+            } else {
+                r.add(makeUnknown(RSs("X.LOADAVG"), Category::CROSSCHECK,
+                                  Severity::LOW, RSs("/proc/loadavg 不可读")));
+            }
         } else {
             const auto f = split(la, ' ');
             if (f.size() != 5) {

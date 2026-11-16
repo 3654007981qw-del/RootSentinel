@@ -96,7 +96,15 @@ void checkBpf(ScanReport& r) {
             const int e2 = (int)(-ret);
             // EINVAL / EOPNOTSUPP / ENOSYS 都表示「这条路走不通」，
             // 属于正常加固状态，不应记为 UNKNOWN 噪音。
-            if (e2 == EINVAL || e2 == ENOSYS || e2 == EOPNOTSUPP) {
+            if (e2 == EACCES) {
+                // v2.22.66：内核的非特权 BPF 门（unprivileged_bpf_disabled）
+                // 在 map_create 里返回 EACCES，与 EPERM 同义——都是
+                // 「拒绝」，属于正常加固。此前未归类，白白落 UNKNOWN。
+                Evidence e = makePass(RSs("G.BPF_SYSCALL"), Category::KERNEL,
+                                      RSs("bpf() 被 EACCES 拒绝（非特权 BPF 已禁用，正常）"));
+                e.addVector(RSs("errno"), errnoName(e2));
+                r.add(std::move(e));
+            } else if (e2 == EINVAL || e2 == ENOSYS || e2 == EOPNOTSUPP) {
                 Evidence e = makePass(RSs("G.BPF_SYSCALL"), Category::KERNEL,
                                       RSs("bpf() 不可用（内核不支持或已禁用）"));
                 e.addVector(RSs("errno"), errnoName(e2));

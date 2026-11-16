@@ -18,6 +18,8 @@
 #include "rs_str.h"
 #include "rs_util.h"
 
+#include <unistd.h>
+
 namespace rs {
 
 namespace {
@@ -47,8 +49,24 @@ void checkKernelExt(ScanReport& r) {
     {
         std::string v;
         if (!readTrim(RSs("/sys/kernel/security/lsm"), v)) {
-            r.add(makeUnknown(RSs("F.LSM"), Category::KERNEL, Severity::LOW,
-                              RSs("/sys/kernel/security/lsm 不可读")));
+            // v2.22.66 推断通道：securityfs 被墙时，本题（SELinux 是否
+            // 在活动 LSM 中）可由两条独立证据推断——进程自身的
+            // 安全上下文只有 SELinux 启用时才存在，selinuxfs 状态页
+            // 同理。两者都在 → SELinux 必然在活动列表中（只能证
+            // 「在」，不能证「不在」，所以只接 PASS 分支）。
+            const auto ctx = trim(readFile(RSs("/proc/self/attr/current"), 256));
+            const auto st = readFile(RSs("/sys/fs/selinux/status"), 64);
+            if (ctx.rfind(RSs("u:r:"), 0) == 0 && st.size() >= 12) {
+                Evidence e = makePass(RSs("F.LSM"), Category::KERNEL,
+                                      RSs("SELinux 处于激活状态（由自身上下文与状态页推断）"));
+                e.confidence = Confidence::MEDIUM;
+                e.addVector(RSs("lsm"), RSs("selinux（推断）"));
+                e.addVector(RSs("domain"), ctx);
+                r.add(std::move(e));
+            } else {
+                r.add(makeUnknown(RSs("F.LSM"), Category::KERNEL, Severity::LOW,
+                                  RSs("/sys/kernel/security/lsm 不可读")));
+            }
         } else if (!contains(v, RSs("selinux"))) {
             Evidence e = makeHit(RSs("F.LSM"), Category::KERNEL,
                                  Severity::CRITICAL, Confidence::HIGH,
@@ -191,8 +209,19 @@ void checkKernelExt(ScanReport& r) {
     {
         const auto data = readFile(RSs("/sys/fs/selinux/booleans"), 256 * 1024);
         if (data.empty()) {
-            r.add(makeUnknown(RSs("F.SE_BOOLS"), Category::SELINUX, Severity::LOW,
-                              RSs("SELinux booleans 不可读")));
+            // v2.22.66：booleans 在 selinuxfs 里是目录，readFile 对
+            // 目录必然失败（旧实现因此恒 UNKNOWN）——改用枚举。
+            const int nb = countDir(RSs("/sys/fs/selinux/booleans"));
+            if (nb > 0) {
+                Evidence e = makePass(RSs("F.SE_BOOLS"), Category::SELINUX,
+                                      RSs("SELinux booleans 可枚举"));
+                e.addVector(RSs("lines"), std::to_string(nb));
+                e.addVector(RSs("via"), RSs("dir"));
+                r.add(std::move(e));
+            } else {
+                r.add(makeUnknown(RSs("F.SE_BOOLS"), Category::SELINUX, Severity::LOW,
+                                  RSs("SELinux booleans 不可读")));
+            }
         } else {
             const auto lines = split(data, '\n');
             Evidence e = makePass(RSs("F.SE_BOOLS"), Category::SELINUX,
@@ -206,8 +235,28 @@ void checkKernelExt(ScanReport& r) {
     {
         const int n = countDir(RSs("/sys/fs/selinux/class"));
         if (n == 0) {
-            r.add(makeUnknown(RSs("F.SE_CLASSES"), Category::SELINUX, Severity::LOW,
-                              RSs("SELinux class 目录不可枚举")));
+            // v2.22.66：枚举被拦时逐个探标准对象类目录——这些类是
+            // 基础策略必备，≥3 个可达即可确认类表存在且可探测。
+            static const char* knownClasses[] = {
+                "file", "dir", "lnk_file", "fd", "process",
+                "tcp_socket", "udp_socket", "capability", "security", "system",
+            };
+            int okClasses = 0;
+            for (const char* c : knownClasses) {
+                if (accessState(RSs("/sys/fs/selinux/class/") + std::string(c), R_OK) == 0) {
+                    ++okClasses;
+                }
+            }
+            if (okClasses >= 3) {
+                Evidence e = makePass(RSs("F.SE_CLASSES"), Category::SELINUX,
+                                      RSs("SELinux 对象类可探测（枚举被拦）"));
+                e.addVector(RSs("classes"), std::to_string(okClasses));
+                e.addVector(RSs("via"), RSs("probe"));
+                r.add(std::move(e));
+            } else {
+                r.add(makeUnknown(RSs("F.SE_CLASSES"), Category::SELINUX, Severity::LOW,
+                                  RSs("SELinux class 目录不可枚举")));
+            }
         } else {
             Evidence e = makePass(RSs("F.SE_CLASSES"), Category::SELINUX,
                                   RSs("SELinux 对象类可枚举"));

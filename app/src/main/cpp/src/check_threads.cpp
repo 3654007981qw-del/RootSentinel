@@ -205,6 +205,12 @@ void checkThreads(ScanReport& r) {
             if (nsSet.size() < 4) nsSet.push_back(d.name + RSs("=") + n);
             break;  // 只看第一个，避免噪音
         }
+        // v2.22.66：任务目录枚举拿不到时，直接读进程自身的 ns 链接
+        // （同一个数据，省掉被拦的那步枚举）。
+        if (nsSet.empty()) {
+            const auto self = readLink(RSs("/proc/self/ns/pid"));
+            if (!self.empty()) nsSet.push_back(RSs("self=") + self);
+        }
     }
     if (!nsSet.empty()) {
         Evidence e = makePass(RSs("D.TASK_NS"), Category::MEMORY,

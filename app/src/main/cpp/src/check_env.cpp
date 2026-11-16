@@ -9,6 +9,7 @@
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
+#include <sys/auxv.h>
 #include <vector>
 
 #include "rs_str.h"
@@ -18,10 +19,8 @@
 namespace rs {
 
 namespace {
-// auxv 类型
-constexpr unsigned long AT_NULL   = 0;
-constexpr unsigned long AT_SECURE = 23;
-constexpr unsigned long AT_EXECFN = 31;
+// auxv 类型常量（AT_NULL / AT_SECURE / AT_EXECFN）由 <sys/auxv.h>
+// 提供（v2.22.66 起为 getauxval 引入），不再本地重复定义。
 
 // personality 标志
 constexpr unsigned long ADDR_NO_RANDOMIZE = 0x0040000;
@@ -88,13 +87,29 @@ void checkEnv(ScanReport& r) {
     // ---------------------------------------------------------- auxv
     {
         const std::string aux = readFile(RSs("/proc/self/auxv"), 4096);
-        if (aux.empty()) {
+        // v2.22.66 底层通道：文件被策略拒绝时改用 getauxval()——auxv
+        // 本来就由内核在 exec 时放进进程内存，没有文件可被拒绝，
+        // 取到的 AT_SECURE / AT_EXECFN 与文件解析完全同义。
+        const bool viaGetauxval = aux.empty();
+        unsigned long secure = 0;
+        std::string execfn;
+        size_t n = 0;
+        bool haveAuxv = false;
+        if (viaGetauxval) {
+            secure = getauxval(AT_SECURE);
+            const unsigned long ef = getauxval(AT_EXECFN);
+            if (ef != 0) {
+                const char* s2 = reinterpret_cast<const char*>(ef);
+                execfn.assign(s2, strnlen(s2, 64));
+            }
+            haveAuxv = true;
+        }
+        if (!haveAuxv && aux.empty()) {
             r.add(makeUnknown(RSs("I.AUXV"), Category::INTEGRITY, Severity::LOW,
                               RSs("/proc/self/auxv 不可读")));
         } else {
-            unsigned long secure = 0;
-            std::string execfn;
-            const size_t n = aux.size() / (sizeof(unsigned long) * 2);
+            if (!viaGetauxval) {
+            n = aux.size() / (sizeof(unsigned long) * 2);
             for (size_t i = 0; i < n; ++i) {
                 // v2.22.45（审查 A P2-16）：逐项 memcpy，避免把 string
                 // 缓冲 reinterpret_cast 成 unsigned long* 的别名/对齐
@@ -112,10 +127,12 @@ void checkEnv(ScanReport& r) {
                     execfn.assign(s, strnlen(s, 64));
                 }
             }
+            }  // 文件解析到此为止；下面是两条通道共用的结论生成
             Evidence e = makePass(RSs("I.AUXV"), Category::INTEGRITY,
                                   RSs("auxv 已解析"));
             e.addVector(RSs("AT_SECURE"), std::to_string(secure));
-            e.addVector(RSs("entries"), std::to_string(n));
+            if (viaGetauxval) e.addVector(RSs("via"), RSs("getauxval"));
+            else e.addVector(RSs("entries"), std::to_string(n));
             if (secure != 0) {
                 e.verdict = Verdict::HIT;
                 e.severity = Severity::LOW;

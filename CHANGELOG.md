@@ -1,5 +1,27 @@
 # Changelog
 
+## 2.22.66 — 2026-11-16
+
+**「未知」专项：给读不到的检查项加更底层的通道。** 上一版真机报告 226 项里有 45 项落「无法判定」，逐项审计后确认其中一批不是权限死墙、只是通道选错了，本版逐项换通道（判定口径不变，不把未知硬说成正常）：
+
+- **电池三项**（A.BATTERY_TEMP / A.POWER_SUPPLY / A.SENSORS）：sysfs 被 SELinux 拒时改走 BatteryManager 粘性广播（温度/状态/电压/电量，框架正式通道，无需权限）；原生层读不到时改为沉默，避免旧的「未知」压过框架层的结论。
+- **I.AUXV**：`/proc/self/auxv` 读不到时改用 `getauxval()` 直接读进程内的 auxv（内核在 exec 时放入，无文件可拒）。
+- **X.LOADAVG / X.CLOCK_SKEW**：`/proc/loadavg`、`/proc/uptime` 被拒时改用 `sysinfo()` 系统调用取同一批内核数据，来源记入证据向量。
+- **G.BPF_SYSCALL**：补齐 errno 分类——内核非特权 BPF 门返回的 EACCES 与 EPERM 同义（拒绝即正常加固），此前未归类而落未知。
+- **I.USER_CA**：改用 AndroidCAStore 权威枚举（用户 CA 别名以 `user:` 开头），取代原来的猜目录读法。
+- **I.VPN**：补全网络扫描，VPN 挂着但不是默认网络时也能得出结论。
+- **F.SE_BOOLS**：修复一个恒未知 bug——booleans 在 selinuxfs 里是目录，旧实现用读文件的方式打开它，必然失败；改用枚举。
+- **F.SE_CLASSES / F.SYS_MODULE**：目录枚举被拦时改为逐个探测已知名字（标准对象类 / 已知 root 模块名），探测的确定答复（存在/不存在）才作数，含糊的拒绝仍保留未知。
+- **F.LSM**：securityfs 被墙时用「自身安全上下文 + selinuxfs 状态页」推断 SELinux 是否激活（只能证在、不能证不在）。
+- **A.BOOT_REASON**：主属性为空时依次问同义属性与 `/proc/bootconfig`。
+- **D.TASK_NS / D.UNIX_ABSTRA**：分别改走 `/proc/self/ns/pid` 直读与 `/proc/self/net/unix` 规范路径，绕开被拦的枚举/路径。
+
+**修复「检测到更新还是闪退」**（崩溃自动上传首次立功：真机堆栈直达服务器定位）：与 .64 修的模板缺失无关，是新的布局崩溃——Miuix 风格下 WindowDialog 内部自带一层滚动容器，更新弹窗（与声明弹窗）里又套了一层 verticalScroll，内层滚动被量到无限高度约束直接抛 IllegalStateException。四个弹窗的滚动列全部加上高度上限（heightIn 360dp），嵌套滚动合法化。
+
+**SELinux 状态通道再纠正**：.65 给 F.SELINUX_ENFORCE 加的 `/sys/fs/selinux/status` 备用通道在真机上仍报未知——该状态页是为 mmap 设计的接口（libselinux 就是 open + mmap 读它），部分内核对 read() 不返回内容，.65 的普通读法拿不到数据。本版改走 mmap 原法，普通读保留为兜底；若厂商策略连 open 都拒（整棵 selinuxfs 被墙），则继续如实报未知。
+
+**明确保留「未知」的项**：A.SU_PATH、A.MAGISK_TRACE、F.KSU_NODE、A.RECOVERY_TRACE、G.ATTEST_CHAIN 是「证据本身有歧义/信任门未过」的设计判定，不用弱通道硬改结论；其余内核节点（/proc/1、kallsyms、/proc/sys/kernel 等）是真权限墙，无特权下没有第二来源，继续如实报未知。
+
 ## 2.22.65 — 2026-11-16
 
 **修「SELinux 状态检测不到」**（用户反馈）：F.SELINUX_ENFORCE 原来只读 `/sys/fs/selinux/enforce` 一个节点，部分厂商机型上该节点权限 0600、应用读不到就落「无法判定」。新增备用通道 `/sys/fs/selinux/status`（内核给用户态的状态页，libselinux 同款读法，通常世界可读），从状态页解析 Enforcing 标志；两个通道都读不到才落无法判定。F.SELINUX_POLICY 的判定同步受益（Enforcing 确认来源更广）。

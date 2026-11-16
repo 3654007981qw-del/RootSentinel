@@ -65,6 +65,33 @@ class SecureEnvDetector(private val context: Context) {
 
     // ------------------------------------------------------------ I.USER_CA
     private fun userCa(): Evidence {
+        // v2.22.66：AndroidCAStore 是框架的权威枚举——用户安装的
+        // CA 别名以 user: 开头，与本题（有没有用户 CA）一一对应。
+        // 枚举成功就以它为准；抛异常才回落到下面的目录探测。
+        try {
+            val ks = java.security.KeyStore.getInstance("AndroidCAStore")
+            ks.load(null)
+            val aliases = ks.aliases().toList()
+            val user = aliases.filter { it.startsWith("user:") }
+            if (user.isNotEmpty()) {
+                return ev(
+                    "I.USER_CA", Severity.HIGH, Verdict.HIT,
+                    "存在用户安装的 CA 证书（${user.size} 个）",
+                    Confidence.HIGH,
+                    vec = user.take(8) + "via=AndroidCAStore",
+                    detail = "用户 CA 能解密任意 App 的 HTTPS 流量，是抓包 / 中间人的前置条件",
+                    fp = "企业 MDM、私人代理、调试环境属正常用途",
+                )
+            }
+            return ev(
+                "I.USER_CA", Severity.INFO, Verdict.PASS,
+                "无用户安装的 CA 证书",
+                Confidence.MEDIUM,
+                vec = listOf("total=${aliases.size}", "via=AndroidCAStore"),
+            )
+        } catch (t: Throwable) {
+            // 回落到目录探测
+        }
         val dirs = listOf(
             "/data/misc/user/0/cacerts-added",
             "/data/misc/keychain/cacerts-added",

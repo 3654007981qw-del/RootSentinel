@@ -40,17 +40,34 @@ class NetworkDetector(private val context: Context) {
     private fun vpn(): Evidence = try {
         val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
             ?: return ev("I.VPN", Severity.LOW, Verdict.UNKNOWN, "ConnectivityManager 不可用")
-        val net = cm.activeNetwork ?: return ev("I.VPN", Severity.LOW, Verdict.UNKNOWN, "无活动网络")
-        val caps = cm.getNetworkCapabilities(net)
-            ?: return ev("I.VPN", Severity.LOW, Verdict.UNKNOWN, "无网络能力信息")
-
-        if (caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
-            ev("I.VPN", Severity.HIGH, Verdict.HIT, "当前流量走 VPN",
+        val activeCaps = cm.activeNetwork?.let { cm.getNetworkCapabilities(it) }
+        if (activeCaps?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true) {
+            return ev("I.VPN", Severity.HIGH, Verdict.HIT, "当前流量走 VPN",
                 Confidence.HIGH,
                 detail = "VPN 可以完全接管流量，是抓包的前置条件",
                 fp = "用户可能正常使用 VPN")
-        } else {
-            ev("I.VPN", Severity.INFO, Verdict.PASS, "当前流量不走 VPN", Confidence.HIGH)
+        }
+        // v2.22.66：旧实现只看默认网络，取不到就 UNKNOWN。补上
+        // 全网络扫描——VPN 可能挂着但不是默认网络；全部网络都
+        // 枚举不到时才保留 UNKNOWN。
+        var swept = 0
+        var vpnElsewhere = false
+        for (n in cm.allNetworks) {
+            val c = cm.getNetworkCapabilities(n) ?: continue
+            swept++
+            if (c.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
+                vpnElsewhere = true
+                break
+            }
+        }
+        when {
+            vpnElsewhere -> ev("I.VPN", Severity.MEDIUM, Verdict.HIT, "存在 VPN 网络（非默认网络）",
+                Confidence.MEDIUM,
+                detail = "VPN 已建立但不是默认网络，流量可能部分经过它",
+                fp = "用户可能正常使用 VPN")
+            activeCaps != null || swept > 0 ->
+                ev("I.VPN", Severity.INFO, Verdict.PASS, "当前流量不走 VPN", Confidence.HIGH)
+            else -> ev("I.VPN", Severity.LOW, Verdict.UNKNOWN, "无活动网络")
         }
     } catch (t: Throwable) {
         ev("I.VPN", Severity.LOW, Verdict.UNKNOWN, "VPN 状态不可读")

@@ -115,8 +115,8 @@ android {
         applicationId = "com.rootsentinel"
         minSdk = 26
         targetSdk = 36
-        versionCode = 22265
-        versionName = "2.22.65"
+        versionCode = 22266
+        versionName = "2.22.66"
 
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
@@ -177,6 +177,16 @@ android {
             jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
             // backdrop 库用了 Kotlin 2.2 的 context parameters
             freeCompilerArgs.add("-Xcontext-parameters")
+            // 与手动流水线一致的实验 API 全局 opt-in（KSU 移植代码
+            // 大量使用 material3 / foundation 实验 API，缺了会在
+            // Gradle 下报 experimental API 错误）
+            freeCompilerArgs.addAll(
+                "-opt-in=androidx.compose.material3.ExperimentalMaterial3Api",
+                "-opt-in=androidx.compose.material3.ExperimentalMaterial3ExpressiveApi",
+                "-opt-in=androidx.compose.foundation.ExperimentalFoundationApi",
+                "-opt-in=androidx.compose.animation.ExperimentalAnimationApi",
+                "-opt-in=kotlinx.coroutines.ExperimentalCoroutinesApi",
+            )
         }
     }
 

@@ -10,6 +10,8 @@
 
 #include <string>
 #include <vector>
+#include <algorithm>
+#include <cerrno>
 
 #include "rs_str.h"
 #include "rs_util.h"
@@ -66,9 +68,59 @@ void checkKernelDeep(ScanReport& r) {
             // 用 /proc/modules 做第二视角
             const auto modsText = readFile(RSs("/proc/modules"), 512 * 1024);
             if (modsText.empty()) {
-                r.add(makeUnknown(RSs("F.SYS_MODULE"), Category::KERNEL,
-                                  Severity::LOW,
-                                  RSs("/sys/module 与 /proc/modules 均不可读")));
+                // v2.22.66 第三视角：枚举与 /proc/modules 都被拦时，
+                // 逐个探测已知 root 模块名的 /sys/module/<name> 节点。
+                // ENOENT 是文件系统给出的确定答复（不存在）；EACCES
+                // 等含糊结果无法区分「存在但被拒绝」，只要有一个
+                // 名字含糊就不能下「不存在」的结论。
+                std::vector<std::string> probeHits;
+                int probeDenied = 0;
+                for (const auto& k : badModuleNames()) {
+                    std::vector<std::string> cands;
+                    cands.push_back(k);
+                    std::string alt = k;
+                    std::replace(alt.begin(), alt.end(), '-', '_');
+                    if (alt != k) cands.push_back(alt);
+                    alt = k;
+                    std::replace(alt.begin(), alt.end(), '_', '-');
+                    if (alt != k) cands.push_back(alt);
+                    int state = -1;  // 0 存在 / 1 确定不存在 / 2 含糊
+                    for (const auto& cand : cands) {
+                        const int er = accessErrnoRaw(
+                            RSs("/sys/module/") + cand, 0);
+                        if (er == 0) {
+                            state = 0;
+                            probeHits.push_back(cand);
+                            break;
+                        }
+                        if (er == ENOENT) {
+                            if (state == -1) state = 1;
+                        } else {
+                            state = 2;
+                        }
+                    }
+                    if (state == 2) ++probeDenied;
+                }
+                if (!probeHits.empty()) {
+                    Evidence e = makeHit(RSs("F.SYS_MODULE"), Category::KERNEL,
+                                         Severity::CRITICAL, Confidence::HIGH,
+                                         RSs("/sys/module 逐个探测发现 root 模块"));
+                    for (const auto& h : probeHits) e.addVector(RSs("module"), h);
+                    e.addVector(RSs("view"), RSs("targeted_probe"));
+                    e.detail = RSs("LKM 型 root 会在 /sys/module 留下模块条目");
+                    e.fp_note = RSs("厂商可能自带同名模块，需核对模块路径");
+                    r.add(std::move(e));
+                } else if (probeDenied == 0) {
+                    Evidence e = makePass(RSs("F.SYS_MODULE"), Category::KERNEL,
+                                          RSs("已知 root 模块名逐个探测均不存在（枚举被系统拦截）"));
+                    e.confidence = Confidence::LOW;
+                    e.addVector(RSs("view"), RSs("targeted_probe"));
+                    r.add(std::move(e));
+                } else {
+                    r.add(makeUnknown(RSs("F.SYS_MODULE"), Category::KERNEL,
+                                      Severity::LOW,
+                                      RSs("/sys/module 与 /proc/modules 均不可读")));
+                }
             } else {
                 std::vector<std::string> hits;
                 int nLines = 0;

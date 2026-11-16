@@ -97,8 +97,8 @@ void checkSandbox(ScanReport& r) {
         const auto cap = trim(readFile(RSs("/sys/class/power_supply/battery/capacity"), 4096));
 
         if (temp.empty() && cap.empty()) {
-            r.add(makeUnknown(RSs("A.SENSORS"), Category::ARTIFACT, Severity::LOW,
-                              RSs("传感器 / 电源节点均不可读")));
+            // v2.22.66：同 A.BATTERY_TEMP，原生层沉默，交给
+            // HardwareDetector 的 BatteryManager 通道（同一 id）。
         } else {
             Evidence e = makePass(RSs("A.SENSORS"), Category::ARTIFACT,
                                   RSs("硬件节点可读（真机特征）"));
@@ -114,9 +114,8 @@ void checkSandbox(ScanReport& r) {
         const auto volt = trim(readFile(RSs("/sys/class/power_supply/battery/voltage_now"), 4096));
 
         if (status.empty() && volt.empty()) {
-            r.add(makeUnknown(RSs("A.POWER_SUPPLY"), Category::ARTIFACT,
-                              Severity::LOW,
-                              RSs("电池节点不可读")));
+            // v2.22.66：同 A.BATTERY_TEMP，原生层沉默，交给
+            // HardwareDetector 的 BatteryManager 通道（同一 id）。
         } else {
             Evidence e = makePass(RSs("A.POWER_SUPPLY"), Category::ARTIFACT,
                                   RSs("电池节点存在"));

@@ -148,7 +148,12 @@ void checkNet(ScanReport& r) {
 
     // ---------------------------------------------------------- D.UNIX_ABSTRA
     {
-        const auto unixData = readFile(RSs("/proc/net/unix"), 512 * 1024);
+        auto unixData = readFile(RSs("/proc/net/unix"), 512 * 1024);
+        // v2.22.66：/proc/net 是指向 /proc/self/net 的符号链接，
+        // 数据同一份；直呼 self 路径可绕开按路径字符串的过滤。
+        if (unixData.empty()) {
+            unixData = readFile(RSs("/proc/self/net/unix"), 512 * 1024);
+        }
         if (unixData.empty()) {
             r.add(makeUnknown(RSs("D.UNIX_ABSTRA"), Category::MEMORY, Severity::LOW,
                               RSs("/proc/net/unix 不可读")));

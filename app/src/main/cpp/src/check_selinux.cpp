@@ -3,6 +3,8 @@
 
 #include <cstdint>
 #include <cstring>
+#include <sys/mman.h>
+#include <fcntl.h>
 #include <unistd.h>
 #include <vector>
 
@@ -56,12 +58,34 @@ void checkSelinux(ScanReport& r) {
     std::string enforce = enforceFile;
     bool enforceViaStatus = false;
     if (enforce != "1" && enforce != "0") {
-        const std::string status = readFile(RSs("/sys/fs/selinux/status"), 64);
-        if (status.size() >= 12) {
-            uint32_t flag = 0;
-            memcpy(&flag, status.data() + 8, sizeof(flag));
-            if (flag == 1) { enforce = "1"; enforceViaStatus = true; }
-            else if (flag == 0) { enforce = "0"; enforceViaStatus = true; }
+        // v2.22.66：status 页是为 mmap 设计的接口（libselinux 的
+        // selinux_status_open 就是 open + mmap），部分内核对它
+        // 的 read() 不返回内容——.65 用 readFile 读在这类内核上
+        // 拿不到数据（真机 .65 仍报未知）。改走 mmap，再以普通
+        // 读作兜底。若 open 本身被策略拒绝，则是整棵 selinuxfs
+        // 被墙，两个通道都无解，保持 UNKNOWN 不硬猜。
+        const int sfd = open(RSs("/sys/fs/selinux/status").c_str(),
+                             O_RDONLY | O_CLOEXEC);
+        if (sfd >= 0) {
+            void* page = mmap(nullptr, 4096, PROT_READ, MAP_SHARED, sfd, 0);
+            if (page != MAP_FAILED) {
+                uint32_t flag = 0;
+                memcpy(&flag, static_cast<const char*>(page) + 8,
+                       sizeof(flag));
+                if (flag == 1) { enforce = "1"; enforceViaStatus = true; }
+                else if (flag == 0) { enforce = "0"; enforceViaStatus = true; }
+                munmap(page, 4096);
+            }
+            close(sfd);
+        }
+        if (!enforceViaStatus) {
+            const std::string status = readFile(RSs("/sys/fs/selinux/status"), 64);
+            if (status.size() >= 12) {
+                uint32_t flag = 0;
+                memcpy(&flag, status.data() + 8, sizeof(flag));
+                if (flag == 1) { enforce = "1"; enforceViaStatus = true; }
+                else if (flag == 0) { enforce = "0"; enforceViaStatus = true; }
+            }
         }
     }
     if (enforce == "1") {

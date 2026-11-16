@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -69,7 +70,13 @@ fun DeclarationDialog(onConfirm: () -> Unit) {
             title = "使用声明与数据说明",
             onDismissRequest = { /* 必须点按钮确认，不提供绕过路径 */ },
             content = {
-                Column(Modifier.verticalScroll(rememberScrollState())) {
+                // heightIn 不是装饰：miuix WindowDialog 内部自带一层
+                // 滚动容器，内层 verticalScroll 会拿到无限高度约束，
+                // 测量时直接抛 IllegalStateException 闪退（v2.22.64
+                // 真机崩溃日志定位，更新弹窗同因）。先用 heightIn 把
+                // 高度钉在有限值内，嵌套滚动才合法。四个弹窗的滚动
+                // 列都按此处理（v2.22.66）。
+                Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
                     DECLARATION_PARAGRAPHS.forEach { p ->
                         Text(p, fontSize = 13.sp, color = MiuixTheme.colorScheme.onBackgroundVariant)
                         Spacer(Modifier.height(8.dp))
@@ -89,7 +96,7 @@ fun DeclarationDialog(onConfirm: () -> Unit) {
             onDismissRequest = { /* 同上 */ },
             title = { M3Text("使用声明与数据说明") },
             text = {
-                Column(Modifier.verticalScroll(rememberScrollState())) {
+                Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
                     DECLARATION_PARAGRAPHS.forEach { p ->
                         M3Text(p, fontSize = 13.sp)
                         Spacer(Modifier.height(8.dp))
@@ -135,7 +142,7 @@ private fun UpdateDialogMiuix(controller: UpdateController, onDismiss: () -> Uni
         onDismissRequest = onDismiss,
         content = {
             Column {
-                Column(Modifier.verticalScroll(rememberScrollState())) {
+                Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
                     when (phase) {
                         UpdateController.Phase.Checking, UpdateController.Phase.Idle ->
                             Text("正在检查更新…", fontSize = 14.sp)
@@ -245,7 +252,7 @@ private fun UpdateDialogMaterial(controller: UpdateController, onDismiss: () -> 
         onDismissRequest = onDismiss,
         title = { M3Text(updateTitle(phase)) },
         text = {
-            Column(Modifier.verticalScroll(rememberScrollState())) {
+            Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
                 when (phase) {
                     UpdateController.Phase.Checking, UpdateController.Phase.Idle ->
                         M3Text("正在检查更新…", fontSize = 14.sp)

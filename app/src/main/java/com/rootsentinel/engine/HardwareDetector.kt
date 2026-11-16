@@ -1,10 +1,13 @@
 package com.rootsentinel.engine
 
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.hardware.Sensor
 import android.hardware.SensorManager
 import android.hardware.camera2.CameraManager
 import android.hardware.input.InputManager
+import android.os.BatteryManager
 import android.os.Build
 import android.telephony.TelephonyManager
 import android.view.inputmethod.InputMethodManager
@@ -15,7 +18,7 @@ import com.rootsentinel.model.Severity
 import com.rootsentinel.model.Verdict
 
 /**
- * 硬件指纹（M9）— 5 项
+ * 硬件指纹（M9）— 8 项
  *
  * 这一层用 Java API 覆盖 native 侧读不到的 sysfs 目录
  * （`/sys/class/sensors`、`/sys/class/power_supply` 的 readdir 常被 SELinux 拒）。
@@ -27,7 +30,80 @@ class HardwareDetector(private val context: Context) {
 
     fun collect(): List<Evidence> = listOf(
         sensorCount(), camera(), inputDevices(), display(), simState(),
+        batteryTemp(), powerSupply(), sensorsHw(),
     )
+
+    // ------------------------------------- v2.22.66 电池广播通道
+    // A.BATTERY_TEMP / A.POWER_SUPPLY / A.SENSORS 原本只有 native 的
+    // sysfs 通道，/sys/class/power_supply 被 SELinux 拒时恒 UNKNOWN。
+    // BatteryManager 的粘性广播是框架为同一批数据开的正式通道，
+    // 不需要任何权限。native 侧已改为 sysfs 读不到就沉默，
+    // 这三个 id 在此统一出结论（合并规则里 UNKNOWN 会压过 PASS）。
+    private fun batteryIntent(): Intent? = try {
+        context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+    } catch (t: Throwable) {
+        null
+    }
+
+    // ----------------------------------------------------- A.BATTERY_TEMP
+    private fun batteryTemp(): Evidence = try {
+        val intent = batteryIntent()
+            ?: return ev("A.BATTERY_TEMP", Severity.LOW, Verdict.UNKNOWN, "电池广播不可用")
+        val v = intent.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, Int.MIN_VALUE)
+        if (v == Int.MIN_VALUE) {
+            ev("A.BATTERY_TEMP", Severity.LOW, Verdict.UNKNOWN, "电池广播无温度字段")
+        } else {
+            val celsius = "%.1f".format(v / 10.0)
+            if (v < 50 || v > 600) {
+                ev("A.BATTERY_TEMP", Severity.MEDIUM, Verdict.HIT, "电池温度异常",
+                    conf = Confidence.MEDIUM,
+                    vec = listOf("raw=$v", "celsius=$celsius", "via=BatteryManager"),
+                    detail = "真机电池温度在 15~45°C；超出范围可能是模拟值")
+            } else {
+                ev("A.BATTERY_TEMP", Severity.INFO, Verdict.PASS, "电池温度正常",
+                    vec = listOf("celsius=$celsius", "via=BatteryManager"))
+            }
+        }
+    } catch (t: Throwable) {
+        ev("A.BATTERY_TEMP", Severity.LOW, Verdict.UNKNOWN, "电池温度不可读")
+    }
+
+    // ----------------------------------------------------- A.POWER_SUPPLY
+    private fun powerSupply(): Evidence = try {
+        val intent = batteryIntent()
+            ?: return ev("A.POWER_SUPPLY", Severity.LOW, Verdict.UNKNOWN, "电池广播不可用")
+        val status = intent.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
+        val voltage = intent.getIntExtra(BatteryManager.EXTRA_VOLTAGE, 0)
+        val statusName = when (status) {
+            BatteryManager.BATTERY_STATUS_CHARGING -> "Charging"
+            BatteryManager.BATTERY_STATUS_DISCHARGING -> "Discharging"
+            BatteryManager.BATTERY_STATUS_NOT_CHARGING -> "Not charging"
+            BatteryManager.BATTERY_STATUS_FULL -> "Full"
+            else -> "Unknown"
+        }
+        val vec = mutableListOf("status=$statusName", "via=BatteryManager")
+        if (voltage > 0) vec.add(1, "voltage_mv=$voltage")
+        ev("A.POWER_SUPPLY", Severity.INFO, Verdict.PASS, "电池节点存在（BatteryManager）",
+            vec = vec)
+    } catch (t: Throwable) {
+        ev("A.POWER_SUPPLY", Severity.LOW, Verdict.UNKNOWN, "电池节点不可读")
+    }
+
+    // ---------------------------------------------------------- A.SENSORS
+    private fun sensorsHw(): Evidence = try {
+        val intent = batteryIntent()
+            ?: return ev("A.SENSORS", Severity.LOW, Verdict.UNKNOWN, "传感器 / 电源节点均不可读")
+        val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
+        val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, 100)
+        if (level >= 0 && scale > 0) {
+            ev("A.SENSORS", Severity.INFO, Verdict.PASS, "硬件节点可读（真机特征）",
+                vec = listOf("battery_capacity=${level * 100 / scale}", "via=BatteryManager"))
+        } else {
+            ev("A.SENSORS", Severity.LOW, Verdict.UNKNOWN, "传感器 / 电源节点均不可读")
+        }
+    } catch (t: Throwable) {
+        ev("A.SENSORS", Severity.LOW, Verdict.UNKNOWN, "传感器 / 电源节点均不可读")
+    }
 
     // ------------------------------------------------------- A.SENSOR_COUNT
     private fun sensorCount(): Evidence = try {

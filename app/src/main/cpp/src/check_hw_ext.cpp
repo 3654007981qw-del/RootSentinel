@@ -35,8 +35,10 @@ void checkHwExt(ScanReport& r) {
     {
         const auto raw = trim(readFile(RSs("/sys/class/power_supply/battery/temp"), 4096));
         if (raw.empty()) {
-            r.add(makeUnknown(RSs("A.BATTERY_TEMP"), Category::ARTIFACT,
-                              Severity::LOW, RSs("电池温度不可读")));
+            // v2.22.66：sysfs 被拒时原生层保持沉默——Kotlin 层
+            // HardwareDetector 用 BatteryManager 广播发同一 id 的
+            // 结论（合并规则里 UNKNOWN 会压过 PASS，原生层若先
+            // 报 UNKNOWN，框架层永远说了不算）。
         } else {
             const long v = std::atol(raw.c_str());
             const double celsius = (double)v / 10.0;
@@ -119,7 +121,35 @@ void checkHwExt(ScanReport& r) {
     // 值为 "kernel_panic" / "watchdog" 等说明设备曾异常重启 ——
     // LKM 型 root 出问题时经常留下这个。
     {
-        const auto reason = getProp(RSs("ro.boot.bootreason"));
+        // v2.22.66：主属性为空时依次问同义属性与 /proc/bootconfig
+        // （部分 ROM 只把启动原因写进其中一处）。
+        std::string reason = getProp(RSs("ro.boot.bootreason"));
+        std::string reasonSrc = RSs("ro.boot.bootreason");
+        if (reason.empty()) {
+            reason = getProp(RSs("sys.boot.reason"));
+            reasonSrc = RSs("sys.boot.reason");
+        }
+        if (reason.empty()) {
+            reason = getProp(RSs("persist.sys.boot.reason"));
+            reasonSrc = RSs("persist.sys.boot.reason");
+        }
+        if (reason.empty()) {
+            const auto bc = readFile(RSs("/proc/bootconfig"), 8192);
+            const auto keyPos = bc.find(RSs("androidboot.bootreason"));
+            if (keyPos != std::string::npos) {
+                const auto eqPos = bc.find('=', keyPos);
+                if (eqPos != std::string::npos) {
+                    auto endPos = bc.find('\n', eqPos);
+                    auto val = trim(bc.substr(eqPos + 1,
+                        (endPos == std::string::npos ? bc.size() : endPos) - eqPos - 1));
+                    if (val.size() >= 2 && val.front() == '"' && val.back() == '"') {
+                        val = val.substr(1, val.size() - 2);
+                    }
+                    reason = val;
+                    reasonSrc = RSs("bootconfig");
+                }
+            }
+        }
         if (reason.empty()) {
             r.add(makeUnknown(RSs("A.BOOT_REASON"), Category::ARTIFACT,
                               Severity::LOW, RSs("bootreason 属性缺失")));
@@ -130,6 +160,9 @@ void checkHwExt(ScanReport& r) {
                                  Severity::MEDIUM, Confidence::MEDIUM,
                                  RSs("上次启动原因是内核异常"));
             e.addVector(RSs("bootreason"), reason);
+            if (reasonSrc != RSs("ro.boot.bootreason")) {
+                e.addVector(RSs("source"), reasonSrc);
+            }
             e.detail = RSs("内核 panic / watchdog / oops 后重启；"
                            "LKM 型 root 不稳定时常出现");
             r.add(std::move(e));
@@ -137,6 +170,9 @@ void checkHwExt(ScanReport& r) {
             Evidence e = makePass(RSs("A.BOOT_REASON"), Category::ARTIFACT,
                                   RSs("启动原因正常"));
             e.addVector(RSs("bootreason"), reason);
+            if (reasonSrc != RSs("ro.boot.bootreason")) {
+                e.addVector(RSs("source"), reasonSrc);
+            }
             r.add(std::move(e));
         }
     }
