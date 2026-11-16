@@ -94,7 +94,7 @@ else()
 endif()
 
 target_compile_definitions(rootsentinel PRIVATE
-        RS_VERSION="2.22.73"
+        RS_VERSION="2.22.74"
 )
 
 # 签名基线（v2.22.41 修复）：构建方通过 -DRS_SIGNER_SHA256=<64 位 hex>
