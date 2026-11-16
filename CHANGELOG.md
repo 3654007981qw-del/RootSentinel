@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.22.75 — 2026-11-17
+
+**SukiSU 外壳内的报表 / 历史两页换成 SukiSU 原生样式。** .74 之前这两页仍是照 KernelSU 外壳写的版本（用 KSU 外壳的模糊与组件、模式跟 KSU 外壳的设置走），放进 SukiSU 外壳里与主页、设置页不是一套。本版按 SukiSU-Nova 自己页面的写法重写这两页：Miuix 模式走 AppScaffold + SukiSU 自家的模糊顶栏与背景感知卡片（AppCard），Material 模式走 SukiSU 自家的 ExpressiveScaffold 与分段列表；明暗模式改读 SukiSU 自己的界面模式（与它的主页、设置页一致），标题走自定义文字系统。数据、文案、导出 / 重检 / 清空 / 点开详情等动作与原页完全一致；KernelSU 外壳内的报表 / 历史页不变。检测引擎无变化。
+
+
 ## 2.22.74 — 2026-11-16
 
 **修复切换/进入 SukiSU 外壳闪退（根因版）。** .73 的自救机制送回了第一份真实堆栈：`NoClassDefFoundError: androidx.lifecycle.MutableLiveData` —— SukiSU 外壳记录当前页签时走 SavedStateHandle，它内部要创建一个 MutableLiveData，而打包依赖里一直缺 lifecycle-livedata-core 这个库（.71 时的 dex 审计曾把它列在缺失清单里，当时误判为无害引用）。本版补入 lifecycle-livedata-core 2.11.0 并加入依赖抓取种子，dex 审计复核其余缺失项均为可选探针类、无代码路径。原 .71/.72 的待发日志在 .73 首次启动时被新崩溃覆盖，未能回收，但本次堆栈与当时的崩溃路径一致（同为进入外壳时触发）。

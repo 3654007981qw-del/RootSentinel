@@ -409,7 +409,6 @@ private fun SukisuPager(
     onClearHistory: () -> Unit,
 ) {
     val uiMode = com.sukisu.nova.ui.LocalUiMode.current
-    val rsUiMode = me.weishu.kernelsu.ui.LocalUiMode.current
     val enableBlur = LocalEnableBlur.current
     val enableFloatingBottomBar = LocalEnableFloatingBottomBar.current
     val enableFloatingBottomBarBlur = LocalEnableFloatingBottomBarBlur.current
@@ -495,16 +494,8 @@ private fun SukisuPager(
                     val isCurrentPage = page == settledPage
                     when (page) {
                         0 -> HomePager(navigator, bottomInnerPadding, isCurrentPage)
-                        1 -> if (rsUiMode == me.weishu.kernelsu.ui.UiMode.Miuix) {
-                            ReportPagerMiuix(reportState, reportActions, bottomInnerPadding)
-                        } else {
-                            ReportPagerMaterial(reportState, reportActions, bottomInnerPadding)
-                        }
-                        2 -> if (rsUiMode == me.weishu.kernelsu.ui.UiMode.Miuix) {
-                            HistoryPagerMiuix(historyEntries, onClearHistory, bottomInnerPadding)
-                        } else {
-                            HistoryPagerMaterial(historyEntries, onClearHistory, bottomInnerPadding)
-                        }
+                        1 -> SukisuReportPager(reportState, reportActions, bottomInnerPadding)
+                        2 -> SukisuHistoryPager(historyEntries, onClearHistory, bottomInnerPadding)
                         else -> SettingPager(navigator, bottomInnerPadding, isCurrentPage)
                     }
                 }

@@ -86,13 +86,13 @@ fun gradeKindOf(g: Grade): Int = when (g) {
     Grade.INCOMPLETE -> 4
 }
 
-private fun verdictWord(v: Verdict): String = when (v) {
+fun verdictWord(v: Verdict): String = when (v) {
     Verdict.HIT -> "命中"
     Verdict.UNKNOWN -> "未知"
     Verdict.PASS -> "通过"
 }
 
-private fun fmtTime(at: Long): String =
+fun fmtTime(at: Long): String =
     SimpleDateFormat("MM-dd HH:mm", Locale.CHINA).format(Date(at))
 
 // ------------------------------------------------------------------ 报告页
@@ -474,7 +474,7 @@ fun HistoryPagerMaterial(
     }
 }
 
-private fun historyGradeWord(name: String): String = when (name) {
+fun historyGradeWord(name: String): String = when (name) {
     "CLEAN" -> "未发现提权"
     "SUSPICIOUS" -> "可疑迹象"
     "ROOTED" -> "已提权"
