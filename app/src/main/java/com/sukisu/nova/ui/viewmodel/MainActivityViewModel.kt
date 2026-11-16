@@ -125,7 +125,27 @@ class MainActivityViewModel(
         }
     }
 
-    private fun readUiState(): MainActivityUiState {
+    // RootSentinel seam hardening (v2.22.72): readUiState() runs
+    // synchronously at ViewModel construction (i.e. during the shell's
+    // first composition) and on every settings change; a throw in any
+    // seam-backed getter must fall back to defaults, never crash.
+    private fun readUiState(): MainActivityUiState =
+        runCatching { readUiStateImpl() }.getOrElse {
+            MainActivityUiState(
+                appSettings = ThemeController.getAppSettings(),
+                pageScale = 1f,
+                enableBlur = true,
+                enableProgressiveBlur = false,
+                enableFloatingBottomBar = true,
+                enableFloatingBottomBarBlur = true,
+                enableNavigationBadge = true,
+                enableSwipeDismiss = true,
+                pagerInterceptionMode = 1,
+                uiMode = UiMode.Miuix,
+            )
+        }
+
+    private fun readUiStateImpl(): MainActivityUiState {
         val useSystemWallpaper = settingRepo.useSystemWallpaper
         val systemWallpaperPath = ImageStorage.systemWallpaperFile(ksuApp)
             .takeIf { it.isFile }?.absolutePath.orEmpty()

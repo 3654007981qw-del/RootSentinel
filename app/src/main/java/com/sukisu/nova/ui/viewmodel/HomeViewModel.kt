@@ -57,8 +57,18 @@ class HomeViewModel : ViewModel() {
     fun refresh() {
         viewModelScope.launch {
             _uiState.update { it.copy(isRefreshing = true, error = null) }
-            val content = withContext(Dispatchers.IO) { buildState() }
-            _uiState.update { it.copy(content = content, isRefreshing = false) }
+            // RootSentinel seam hardening (v2.22.72): buildState() reads
+            // seam-backed channels (libsu shell, SELinux checker, prefs);
+            // a throw must surface as the error state, never crash the app.
+            runCatching { withContext(Dispatchers.IO) { buildState() } }
+                .onSuccess { content ->
+                    _uiState.update { it.copy(content = content, isRefreshing = false) }
+                }
+                .onFailure { e ->
+                    _uiState.update {
+                        it.copy(isRefreshing = false, error = e.message ?: e.javaClass.simpleName)
+                    }
+                }
         }
     }
 

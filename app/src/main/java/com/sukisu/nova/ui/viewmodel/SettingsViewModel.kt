@@ -145,181 +145,188 @@ class SettingsViewModel(
     }
 
     fun refresh() {
-        viewModelScope.launch {
-            val appIconId = repo.appIconId
-            val appIconDynamicColor = repo.appIconDynamicColor
-            val themeMode = repo.themeMode
-            val miuixMonet = repo.miuixMonet
-            val keyColor = repo.keyColor
-            val enablePredictiveBack = repo.enablePredictiveBack
-            val enableSwipeDismiss = repo.enableSwipeDismiss
-            val pagerInterceptionMode = repo.pagerInterceptionMode
-            val enableBlur = repo.enableBlur
-            val enableProgressiveBlur = repo.enableProgressiveBlur
-            val enableFloatingBottomBar = repo.enableFloatingBottomBar
-            val enableFloatingBottomBarBlur = repo.enableFloatingBottomBarBlur
-            val enableNavigationBadge = repo.enableNavigationBadge
-            val pageScale = repo.pageScale
-            val bottomBarIcons = repo.bottomBarIcons
-            val moduleDescriptionMaxLines = repo.moduleDescriptionMaxLines
-            val enableWebDebugging = repo.enableWebDebugging
-            val autoDeleteModuleZip = repo.autoDeleteModuleZip
-            val autoDeleteUpdateApk = repo.autoDeleteUpdateApk
-            val showFullStatus = repo.showFullStatus
-            val hideHomeWarnings = repo.hideHomeWarnings
-            val showAiHomeCard = repo.showAiHomeCard
-            val colorStyle = repo.colorStyle
-            val colorSpec = repo.colorSpec
-            val customAppearanceJson = repo.customAppearanceJson
-            val appearanceData = withContext(Dispatchers.IO) { AppearanceOverlayStore.data(repo) }
-            val isLkmMode = repo.isLkmMode()
-
-            // Async loading for natives/features
-            val suCompatStatus = repo.getSuCompatStatus()
-            val suCompatPersistValue = repo.getSuCompatPersistValue()
-            val isSuEnabled = repo.isSuEnabled()
-
-            // Forced features show the value in effect, the persisted one is ignored
-            val suCompatMode = when {
-                suCompatStatus == "forced" -> if (isSuEnabled) 0 else 2
-                suCompatPersistValue == 0L -> 2
-                !isSuEnabled -> 1
-                else -> 0
-            }
-
-            val kernelUmountStatus = repo.getKernelUmountStatus()
-            val isKernelUmountEnabled = repo.isKernelUmountEnabled()
-            val selinuxHideStatus = repo.getSelinuxHideStatus()
-            val isSelinuxHideEnabled = repo.isSelinuxHideEnabled()
-            val avcSpoofStatus = repo.getAvcSpoofStatus()
-            val isAvcSpoofEnabled = repo.isAvcSpoofEnabled()
-            val mountHideStatus = repo.getMountHideStatus()
-            val isMountHideEnabled = repo.isMountHideEnabled()
-            val sulogStatus = repo.getSulogStatus()
-            val isSulogEnabled = if (sulogStatus == "forced") {
-                repo.getSulogValue() == 1L
-            } else {
-                repo.getSulogPersistValue() == 1L
-            }
-            val adbRootStatus = repo.getAdbRootStatus()
-            val isAdbRootEnabled = if (adbRootStatus == "forced") {
-                repo.getAdbRootValue() == 1L
-            } else {
-                repo.getAdbRootPersistValue() == 1L
-            }
-            val shellSuAdbOnlyStatus = repo.getShellSuAdbOnlyStatus()
-            val isShellSuAdbOnlyEnabled = if (shellSuAdbOnlyStatus == "forced") {
-                repo.getShellSuAdbOnlyValue() == 1L
-            } else {
-                repo.getShellSuAdbOnlyPersistValue() == 1L
-            }
-            val isDefaultUmountModules = repo.isDefaultUmountModules()
-            val uiMode = repo.uiMode
-            val appLanguage = repo.appLanguage
-            val autoJailbreak = repo.autoJailbreak
-            val builtinZygisk = repo.builtinZygisk
-            val useSoftReboot = repo.useSoftReboot
-            val isLateLoadMode = Natives.isLateLoadMode
-            val systemWallpaperPath = ImageStorage.systemWallpaperFile(ksuApp)
-                .takeIf { it.isFile }?.absolutePath.orEmpty()
-
-            _uiState.update {
-                it.copy(
-                    uiMode = uiMode,
-                    appLanguage = appLanguage,
-                    checkUpdate = repo.checkUpdate,
-                    checkCiUpdate = repo.checkCiUpdate,
-                    checkModuleUpdate = repo.checkModuleUpdate,
-                    appIconId = appIconId,
-                    appIconDynamicColor = appIconDynamicColor,
-                    backgroundAppearanceExpanded = repo.backgroundAppearanceExpanded,
-                    backgroundSectionExpanded = repo.backgroundSectionExpanded,
-                    themePackageSectionExpanded = repo.themePackageSectionExpanded,
-                    appearanceSectionExpanded = repo.appearanceSectionExpanded,
-                    homeCardSectionExpanded = repo.homeCardSectionExpanded,
-                    colorsSectionExpanded = repo.colorsSectionExpanded,
-                    bottomBarSectionExpanded = repo.bottomBarSectionExpanded,
-                    interactionSectionExpanded = repo.interactionSectionExpanded,
-                    detailsSectionExpanded = repo.detailsSectionExpanded,
-                    customHomeTitle = repo.customHomeTitle,
-                    customTexts = repo.customTexts,
-                    adaptiveThemeActive = AdaptiveThemeStore.isActive(repo),
-                    adaptiveDraftLightCaptured = AdaptiveThemeStore.loadDraft(repo)?.light != null,
-                    adaptiveDraftDarkCaptured = AdaptiveThemeStore.loadDraft(repo)?.dark != null,
-                    adaptiveDraftComplete = AdaptiveThemeStore.loadDraft(repo)?.complete == true,
-                    homeCardImagePath = repo.homeCardImagePath,
-                    hideHomeCardStatusText = repo.hideHomeCardStatusText,
-                    hideHomeCardDecoration = repo.hideHomeCardDecoration,
-                    homeCardStickers = repo.homeCardStickers,
-                    bottomBarIcons = bottomBarIcons,
-                    homeLayout = HomeLayout.fromValue(repo.homeLayout),
-homeStatusAlignment = HomeStatusAlignment.fromValue(repo.homeStatusAlignment),
-                    homeStatusScale = HomeStatusStyle.coerceScale(repo.homeStatusScale),
-homePillScale = HomeStatusStyle.coercePillScale(repo.homePillScale),
-                    homeStatusWidthFraction = HomeStatusStyle.coerceWidth(repo.homeStatusWidthFraction),
-                    homeCardImageStyle = HomeCardImageStyle.fromValue(repo.homeCardImageStyle),
-                    showHomeCardImageWithoutBackground = repo.showHomeCardImageWithoutBackground,
-                    customAppearanceJson = customAppearanceJson,
-                    customColorsPresent = appearanceData?.colors != null,
-                    imageEffectsPresent = appearanceData?.image != null,
-                    appearance = AppearanceOverlayStore.load(repo),
-                    appearanceData = appearanceData,
-                    themeMode = themeMode,
-                    miuixMonet = miuixMonet,
-                    keyColor = keyColor,
-                    enablePredictiveBack = enablePredictiveBack,
-                    enableSwipeDismiss = enableSwipeDismiss,
-                    pagerInterceptionMode = pagerInterceptionMode,
-                    enableBlur = enableBlur,
-                    enableProgressiveBlur = enableProgressiveBlur,
-                    enableFloatingBottomBar = enableFloatingBottomBar,
-                    enableFloatingBottomBarBlur = enableFloatingBottomBarBlur,
-                    enableNavigationBadge = enableNavigationBadge,
-                    pageScale = pageScale,
-                    moduleDescriptionMaxLines = moduleDescriptionMaxLines,
-                    enableWebDebugging = enableWebDebugging,
-                    autoDeleteModuleZip = autoDeleteModuleZip,
-                    autoDeleteUpdateApk = autoDeleteUpdateApk,
-                    showFullStatus = showFullStatus,
-                    hideHomeWarnings = hideHomeWarnings,
-                    showAiHomeCard = showAiHomeCard,
-                    colorStyle = colorStyle,
-                    colorSpec = colorSpec,
-                    suCompatStatus = suCompatStatus,
-                    suCompatMode = suCompatMode,
-                    isSuEnabled = isSuEnabled,
-                    adbRootStatus = adbRootStatus,
-                    isAdbRootEnabled = isAdbRootEnabled,
-                    shellSuAdbOnlyStatus = shellSuAdbOnlyStatus,
-                    isShellSuAdbOnlyEnabled = isShellSuAdbOnlyEnabled,
-                    kernelUmountStatus = kernelUmountStatus,
-                    isKernelUmountEnabled = isKernelUmountEnabled,
-                    selinuxHideStatus = selinuxHideStatus,
-                    isSelinuxHideEnabled = isSelinuxHideEnabled,
-                    avcSpoofStatus = avcSpoofStatus,
-                    isAvcSpoofEnabled = isAvcSpoofEnabled,
-                    mountHideStatus = mountHideStatus,
-                    isMountHideEnabled = isMountHideEnabled,
-                    sulogStatus = sulogStatus,
-                    isSulogEnabled = isSulogEnabled,
-                    isDefaultUmountModules = isDefaultUmountModules,
-                    isLkmMode = isLkmMode,
-                    autoJailbreak = autoJailbreak,
-                    builtinZygisk = builtinZygisk,
-                    useSoftReboot = useSoftReboot,
-                    isLateLoadMode = isLateLoadMode,
-                    customBackgroundUri = repo.customBackgroundUri,
-                    customBackgroundUpdatedAt = repo.customBackgroundUpdatedAt,
-                    useSystemWallpaper = repo.useSystemWallpaper && systemWallpaperPath.isNotEmpty(),
-                    systemWallpaperPath = systemWallpaperPath,
-                    extractColorFromBackground = repo.derivesKeyColorFromBackground(),
-                    cardBackgroundAlphaPercent = repo.cardBackgroundAlphaPercent,
-                    customBackgroundBlurPercent = repo.customBackgroundBlurPercent,
-                    customBackgroundScrimPercent = repo.customBackgroundScrimPercent,
-                )
-            }
-        }
+        // RootSentinel seam hardening (v2.22.72): the refresh body reads
+        // dozens of repository getters backed by seam channels; upstream
+        // assumes they cannot throw. Here a throw becomes a no-op refresh
+        // instead of an uncaught viewModelScope crash.
+        viewModelScope.launch { runCatching { refreshInternal() } }
     }
+
+    private suspend fun refreshInternal() {
+        val appIconId = repo.appIconId
+        val appIconDynamicColor = repo.appIconDynamicColor
+        val themeMode = repo.themeMode
+        val miuixMonet = repo.miuixMonet
+        val keyColor = repo.keyColor
+        val enablePredictiveBack = repo.enablePredictiveBack
+        val enableSwipeDismiss = repo.enableSwipeDismiss
+        val pagerInterceptionMode = repo.pagerInterceptionMode
+        val enableBlur = repo.enableBlur
+        val enableProgressiveBlur = repo.enableProgressiveBlur
+        val enableFloatingBottomBar = repo.enableFloatingBottomBar
+        val enableFloatingBottomBarBlur = repo.enableFloatingBottomBarBlur
+        val enableNavigationBadge = repo.enableNavigationBadge
+        val pageScale = repo.pageScale
+        val bottomBarIcons = repo.bottomBarIcons
+        val moduleDescriptionMaxLines = repo.moduleDescriptionMaxLines
+        val enableWebDebugging = repo.enableWebDebugging
+        val autoDeleteModuleZip = repo.autoDeleteModuleZip
+        val autoDeleteUpdateApk = repo.autoDeleteUpdateApk
+        val showFullStatus = repo.showFullStatus
+        val hideHomeWarnings = repo.hideHomeWarnings
+        val showAiHomeCard = repo.showAiHomeCard
+        val colorStyle = repo.colorStyle
+        val colorSpec = repo.colorSpec
+        val customAppearanceJson = repo.customAppearanceJson
+        val appearanceData = withContext(Dispatchers.IO) { AppearanceOverlayStore.data(repo) }
+        val isLkmMode = repo.isLkmMode()
+
+        // Async loading for natives/features
+        val suCompatStatus = repo.getSuCompatStatus()
+        val suCompatPersistValue = repo.getSuCompatPersistValue()
+        val isSuEnabled = repo.isSuEnabled()
+
+        // Forced features show the value in effect, the persisted one is ignored
+        val suCompatMode = when {
+            suCompatStatus == "forced" -> if (isSuEnabled) 0 else 2
+            suCompatPersistValue == 0L -> 2
+            !isSuEnabled -> 1
+            else -> 0
+        }
+
+        val kernelUmountStatus = repo.getKernelUmountStatus()
+        val isKernelUmountEnabled = repo.isKernelUmountEnabled()
+        val selinuxHideStatus = repo.getSelinuxHideStatus()
+        val isSelinuxHideEnabled = repo.isSelinuxHideEnabled()
+        val avcSpoofStatus = repo.getAvcSpoofStatus()
+        val isAvcSpoofEnabled = repo.isAvcSpoofEnabled()
+        val mountHideStatus = repo.getMountHideStatus()
+        val isMountHideEnabled = repo.isMountHideEnabled()
+        val sulogStatus = repo.getSulogStatus()
+        val isSulogEnabled = if (sulogStatus == "forced") {
+            repo.getSulogValue() == 1L
+        } else {
+            repo.getSulogPersistValue() == 1L
+        }
+        val adbRootStatus = repo.getAdbRootStatus()
+        val isAdbRootEnabled = if (adbRootStatus == "forced") {
+            repo.getAdbRootValue() == 1L
+        } else {
+            repo.getAdbRootPersistValue() == 1L
+        }
+        val shellSuAdbOnlyStatus = repo.getShellSuAdbOnlyStatus()
+        val isShellSuAdbOnlyEnabled = if (shellSuAdbOnlyStatus == "forced") {
+            repo.getShellSuAdbOnlyValue() == 1L
+        } else {
+            repo.getShellSuAdbOnlyPersistValue() == 1L
+        }
+        val isDefaultUmountModules = repo.isDefaultUmountModules()
+        val uiMode = repo.uiMode
+        val appLanguage = repo.appLanguage
+        val autoJailbreak = repo.autoJailbreak
+        val builtinZygisk = repo.builtinZygisk
+        val useSoftReboot = repo.useSoftReboot
+        val isLateLoadMode = Natives.isLateLoadMode
+        val systemWallpaperPath = ImageStorage.systemWallpaperFile(ksuApp)
+            .takeIf { it.isFile }?.absolutePath.orEmpty()
+
+        _uiState.update {
+            it.copy(
+                uiMode = uiMode,
+                appLanguage = appLanguage,
+                checkUpdate = repo.checkUpdate,
+                checkCiUpdate = repo.checkCiUpdate,
+                checkModuleUpdate = repo.checkModuleUpdate,
+                appIconId = appIconId,
+                appIconDynamicColor = appIconDynamicColor,
+                backgroundAppearanceExpanded = repo.backgroundAppearanceExpanded,
+                backgroundSectionExpanded = repo.backgroundSectionExpanded,
+                themePackageSectionExpanded = repo.themePackageSectionExpanded,
+                appearanceSectionExpanded = repo.appearanceSectionExpanded,
+                homeCardSectionExpanded = repo.homeCardSectionExpanded,
+                colorsSectionExpanded = repo.colorsSectionExpanded,
+                bottomBarSectionExpanded = repo.bottomBarSectionExpanded,
+                interactionSectionExpanded = repo.interactionSectionExpanded,
+                detailsSectionExpanded = repo.detailsSectionExpanded,
+                customHomeTitle = repo.customHomeTitle,
+                customTexts = repo.customTexts,
+                adaptiveThemeActive = AdaptiveThemeStore.isActive(repo),
+                adaptiveDraftLightCaptured = AdaptiveThemeStore.loadDraft(repo)?.light != null,
+                adaptiveDraftDarkCaptured = AdaptiveThemeStore.loadDraft(repo)?.dark != null,
+                adaptiveDraftComplete = AdaptiveThemeStore.loadDraft(repo)?.complete == true,
+                homeCardImagePath = repo.homeCardImagePath,
+                hideHomeCardStatusText = repo.hideHomeCardStatusText,
+                hideHomeCardDecoration = repo.hideHomeCardDecoration,
+                homeCardStickers = repo.homeCardStickers,
+                bottomBarIcons = bottomBarIcons,
+                homeLayout = HomeLayout.fromValue(repo.homeLayout),
+homeStatusAlignment = HomeStatusAlignment.fromValue(repo.homeStatusAlignment),
+                homeStatusScale = HomeStatusStyle.coerceScale(repo.homeStatusScale),
+homePillScale = HomeStatusStyle.coercePillScale(repo.homePillScale),
+                homeStatusWidthFraction = HomeStatusStyle.coerceWidth(repo.homeStatusWidthFraction),
+                homeCardImageStyle = HomeCardImageStyle.fromValue(repo.homeCardImageStyle),
+                showHomeCardImageWithoutBackground = repo.showHomeCardImageWithoutBackground,
+                customAppearanceJson = customAppearanceJson,
+                customColorsPresent = appearanceData?.colors != null,
+                imageEffectsPresent = appearanceData?.image != null,
+                appearance = AppearanceOverlayStore.load(repo),
+                appearanceData = appearanceData,
+                themeMode = themeMode,
+                miuixMonet = miuixMonet,
+                keyColor = keyColor,
+                enablePredictiveBack = enablePredictiveBack,
+                enableSwipeDismiss = enableSwipeDismiss,
+                pagerInterceptionMode = pagerInterceptionMode,
+                enableBlur = enableBlur,
+                enableProgressiveBlur = enableProgressiveBlur,
+                enableFloatingBottomBar = enableFloatingBottomBar,
+                enableFloatingBottomBarBlur = enableFloatingBottomBarBlur,
+                enableNavigationBadge = enableNavigationBadge,
+                pageScale = pageScale,
+                moduleDescriptionMaxLines = moduleDescriptionMaxLines,
+                enableWebDebugging = enableWebDebugging,
+                autoDeleteModuleZip = autoDeleteModuleZip,
+                autoDeleteUpdateApk = autoDeleteUpdateApk,
+                showFullStatus = showFullStatus,
+                hideHomeWarnings = hideHomeWarnings,
+                showAiHomeCard = showAiHomeCard,
+                colorStyle = colorStyle,
+                colorSpec = colorSpec,
+                suCompatStatus = suCompatStatus,
+                suCompatMode = suCompatMode,
+                isSuEnabled = isSuEnabled,
+                adbRootStatus = adbRootStatus,
+                isAdbRootEnabled = isAdbRootEnabled,
+                shellSuAdbOnlyStatus = shellSuAdbOnlyStatus,
+                isShellSuAdbOnlyEnabled = isShellSuAdbOnlyEnabled,
+                kernelUmountStatus = kernelUmountStatus,
+                isKernelUmountEnabled = isKernelUmountEnabled,
+                selinuxHideStatus = selinuxHideStatus,
+                isSelinuxHideEnabled = isSelinuxHideEnabled,
+                avcSpoofStatus = avcSpoofStatus,
+                isAvcSpoofEnabled = isAvcSpoofEnabled,
+                mountHideStatus = mountHideStatus,
+                isMountHideEnabled = isMountHideEnabled,
+                sulogStatus = sulogStatus,
+                isSulogEnabled = isSulogEnabled,
+                isDefaultUmountModules = isDefaultUmountModules,
+                isLkmMode = isLkmMode,
+                autoJailbreak = autoJailbreak,
+                builtinZygisk = builtinZygisk,
+                useSoftReboot = useSoftReboot,
+                isLateLoadMode = isLateLoadMode,
+                customBackgroundUri = repo.customBackgroundUri,
+                customBackgroundUpdatedAt = repo.customBackgroundUpdatedAt,
+                useSystemWallpaper = repo.useSystemWallpaper && systemWallpaperPath.isNotEmpty(),
+                systemWallpaperPath = systemWallpaperPath,
+                extractColorFromBackground = repo.derivesKeyColorFromBackground(),
+                cardBackgroundAlphaPercent = repo.cardBackgroundAlphaPercent,
+                customBackgroundBlurPercent = repo.customBackgroundBlurPercent,
+                customBackgroundScrimPercent = repo.customBackgroundScrimPercent,
+            )
+        }
+        }
+
 
     fun stagePickedBackground(context: Context, uri: Uri, onReady: (String?) -> Unit) {
         viewModelScope.launch {

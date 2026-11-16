@@ -129,6 +129,15 @@ class MainActivity : ComponentActivity() {
         ksuApp = application
         // v2.22.64：尽早装崩溃捕获（只落盘，下次启动再按开关上传）
         com.rootsentinel.util.CrashReporter.install(application)
+        // v2.22.72：崩溃补传提前到 onCreate（后台线程）——.71 的教训：
+        // 若崩溃发生在首帧组合（如切换 UI 外壳时），RootApp 里的
+        // LaunchedEffect 永远等不到执行，日志会被崩溃循环饿死。
+        Thread {
+            val sp = application.getSharedPreferences("rs_settings", android.content.Context.MODE_PRIVATE)
+            if (sp.getBoolean("declarationSeen", false) && sp.getBoolean("crashUploadEnabled", true)) {
+                com.rootsentinel.util.CrashReporter.uploadPending(application)
+            }
+        }.start()
         enableEdgeToEdge()
         val auto = intent?.getStringExtra("auto")
         val tab = intent?.getIntExtra("tab", 0) ?: 0

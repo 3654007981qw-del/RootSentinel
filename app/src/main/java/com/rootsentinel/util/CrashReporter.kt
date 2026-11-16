@@ -33,6 +33,7 @@ object CrashReporter {
     /** 堆栈文本上限（与接收端 /crash 的 schema 上限 65536 对齐，留余量）。 */
     private const val MAX_STACK_CHARS = 48 * 1024
     private const val FILE_NAME = "pending-crash.json"
+    private val uploadLock = Any()
 
     @Volatile
     private var installed = false
@@ -90,6 +91,12 @@ object CrashReporter {
      * 这是启动旁路，绝不许影响应用打开。
      */
     fun uploadPending(app: Application) {
+        // v2.22.72: onCreate 提前上传与 RootApp 的 LaunchedEffect 可能并发，
+        // 用锁串行化，避免同一份日志重复发送（删除只在 2xx 后发生）。
+        synchronized(uploadLock) { uploadPendingLocked(app) }
+    }
+
+    private fun uploadPendingLocked(app: Application) {
         if (!Telemetry.configured) return
         runCatching {
             val f = pendingFile(app)
