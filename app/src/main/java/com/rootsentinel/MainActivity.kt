@@ -329,12 +329,13 @@ fun RootApp(auto: String?, initialTab: Int, initialSub: String?) {
     )
 
     val uname = remember { runCatching { android.system.Os.uname() }.getOrNull() }
-    val selinuxStatus = remember {
-        runCatching { java.io.File("/sys/fs/selinux/enforce").readText().trim() }
-            .getOrNull()
-            ?.let { if (it == "1") "Enforcing" else if (it == "0") "Permissive" else "Unknown" }
-            ?: "Unknown"
-    }
+    // v2.22.69：首页 SELinux 行改走 PagesRs.selinuxStatusText() 的分层
+    // 通道（enforce 文件 → status 页 → 金丝雀推断）。此前这里直读
+    // enforce 文件，是全应用第三处原始读法——selinuxfs 被厂商关闭的
+    // 机型上恒 Unknown，与检测结论（.67 起已判定通过）对不上。
+    // 首页是汇总显示，只取规范词（Enforcing/Permissive/Unknown），
+    // 推断标记留在设备页与检测详情里。
+    val selinuxStatus = remember { selinuxStatusText().substringBefore("（") }
     val homeState = HomeUiState(
         checkUpdateEnabled = settings.checkUpdate,
         hasUpdate = updateController.phase == UpdateController.Phase.Available && updateController.info != null,

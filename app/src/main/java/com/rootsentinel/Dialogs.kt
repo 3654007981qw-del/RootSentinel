@@ -27,7 +27,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import me.weishu.kernelsu.ui.UiMode
-import me.weishu.kernelsu.ui.component.markdown.MarkdownContent
+import me.weishu.kernelsu.ui.component.markdown.GithubMarkdown
 import me.weishu.kernelsu.ui.LocalUiMode
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.LinearProgressIndicator as MiuixLinearProgress
@@ -159,7 +159,14 @@ private fun UpdateDialogMiuix(controller: UpdateController, onDismiss: () -> Uni
                             Text("来源：${info.source} · 大小：${fmtBytes(info.apkSize)}", fontSize = 12.sp)
                             if (info.notes.isNotBlank()) {
                                 Spacer(Modifier.height(10.dp))
-                                MarkdownContent(content = info.notes, isMarkdown = true)
+                                // v2.22.69：不用 MarkdownContent——它自带一层
+                                // verticalScroll，嵌在本弹窗的滚动列里会被以
+                                // 无限高测量而抛 IllegalStateException（.64/
+                                // .65/.66 更新弹窗闪退的真因；.66 给外层列加
+                                // heightIn 治不了，因为滚动容器给子项的永远
+                                // 是无限高）。直接用无滚动包装的 GithubMarkdown
+                                // （WebView 本身不是 Compose 滚动容器）。
+                                GithubMarkdown(content = info.notes, isMarkdown = true)
                             }
                             Spacer(Modifier.height(6.dp))
                             Text("下载完成后将自动校验 SHA-256、包名与签名，校验通过才调起安装。", fontSize = 12.sp)
