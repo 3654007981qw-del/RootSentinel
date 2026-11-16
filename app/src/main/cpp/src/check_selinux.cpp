@@ -1,6 +1,8 @@
 // check_selinux.cpp — F SELinux 与命名空间域
 #include "rs_checks.h"
 
+#include <cstdint>
+#include <cstring>
 #include <unistd.h>
 #include <vector>
 
@@ -43,34 +45,54 @@ void checkSelinux(ScanReport& r) {
     }
 
     // ---------------------------------------------------------- enforce
-    const std::string enforce = trim(readFile(RSs("/sys/fs/selinux/enforce")));
+    // 主通道：/sys/fs/selinux/enforce（内容 "1"/"0"）。
+    // 备用通道：/sys/fs/selinux/status —— 内核给用户态的状态页
+    // （libselinux 的 selinux_status_open 读的就是它），布局是 5 个
+    // u32：version / sequence / enforcing / policyload / deny_unknown，
+    // enforcing 在偏移 8。该节点通常 0644 世界可读；enforce 节点在
+    // 部分厂商机型上是 0600、App 读不到，此时靠 status 页确认状态，
+    // 不再一律落 UNKNOWN（v2.22.65，用户反馈「SELinux 状态检测不到」）。
+    const std::string enforceFile = trim(readFile(RSs("/sys/fs/selinux/enforce")));
+    std::string enforce = enforceFile;
+    bool enforceViaStatus = false;
+    if (enforce != "1" && enforce != "0") {
+        const std::string status = readFile(RSs("/sys/fs/selinux/status"), 64);
+        if (status.size() >= 12) {
+            uint32_t flag = 0;
+            memcpy(&flag, status.data() + 8, sizeof(flag));
+            if (flag == 1) { enforce = "1"; enforceViaStatus = true; }
+            else if (flag == 0) { enforce = "0"; enforceViaStatus = true; }
+        }
+    }
     if (enforce == "1") {
         Evidence e = makePass(RSs("F.SELINUX_ENFORCE"), Category::SELINUX,
                               RSs("SELinux = Enforcing"));
         e.addVector(RSs("enforce"), enforce);
+        if (enforceViaStatus) e.addVector(RSs("via"), RSs("/sys/fs/selinux/status"));
         r.add(std::move(e));
     } else if (enforce == "0") {
         Evidence e = makeHit(RSs("F.SELINUX_ENFORCE"), Category::SELINUX,
                              Severity::CRITICAL, Confidence::HIGH,
                              RSs("SELinux 处于 Permissive 模式"));
         e.addVector(RSs("enforce"), enforce);
+        if (enforceViaStatus) e.addVector(RSs("via"), RSs("/sys/fs/selinux/status"));
         r.add(std::move(e));
     } else {
-        // 读不到：原厂 App 也可能读不到（部分机型 selinuxfs 的 enforce 是 0600）
+        // 两个通道都读不到：原厂 App 也可能读不到（部分机型 selinuxfs 受限）
         r.add(makeUnknown(RSs("F.SELINUX_ENFORCE"), Category::SELINUX,
                           Severity::LOW,
-                          RSs("enforce 不可读（原厂部分机型同样如此）")));
+                          RSs("enforce 与 status 均不可读（原厂部分机型同样如此）")));
     }
 
     // ---------------------------------------------------------- getenforce 语义
     // 注意：我们无法在此调用 Java 的 getenforce，只用文件路径判断
     // 若 enforce 可读但 policyvers 不可读，说明 selinuxfs 被部分过滤
     const std::string policyvers = trim(readFile(RSs("/sys/fs/selinux/policyvers")));
-    if (!enforce.empty() && policyvers.empty()) {
+    if (!enforceFile.empty() && policyvers.empty()) {
         Evidence e = makeHit(RSs("F.SELINUX_FILTERED"), Category::SELINUX,
                              Severity::MEDIUM, Confidence::MEDIUM,
                              RSs("selinuxfs 部分节点不可读 ← 策略被改过"));
-        e.addVector(RSs("enforce"), enforce);
+        e.addVector(RSs("enforce"), enforceFile);
         e.addVector(RSs("policyvers"), RSs("N/A"));
         r.add(std::move(e));
     }

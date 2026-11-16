@@ -397,7 +397,8 @@ fun RootApp(auto: String?, initialTab: Int, initialSub: String?) {
         } ?: "",
     )
     val reportActions = ReportActions(
-        onRescan = { mainPagerState.animateToPage(0) },
+        // 「重新检测」：回首页并立即开扫（旧实现只回首页不扫，用户反馈没用）
+        onRescan = { mainPagerState.animateToPage(0); if (!scan.scanning) startScan() },
         onExport = {
             val r = result
             if (r == null) {
