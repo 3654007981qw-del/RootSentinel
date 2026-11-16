@@ -34,10 +34,10 @@ jobs:
       # 规矩：防签名密码误入该文件再被提交），所以 CI 里没有这个
       # 文件；构建必需的非机密属性用 -P 显式传入。
       - name: Unit tests
-        run: ./gradlew :app:testDebugUnitTest -Pandroid.useAndroidX=true -Pandroid.nonTransitiveRClass=false
+        run: ./gradlew :app:testDebugUnitTest -Pandroid.useAndroidX=true -Pandroid.nonTransitiveRClass=false -Dorg.gradle.jvmargs=-Xmx3g
 
       - name: Assemble debug
-        run: ./gradlew :app:assembleDebug -Pandroid.useAndroidX=true -Pandroid.nonTransitiveRClass=false
+        run: ./gradlew :app:assembleDebug -Pandroid.useAndroidX=true -Pandroid.nonTransitiveRClass=false -Dorg.gradle.jvmargs=-Xmx3g
 
   native:
     # v2.22.53（第八轮审查 P3-02）：此前 CI 只有上面的 Gradle job，
