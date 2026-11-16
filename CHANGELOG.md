@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.22.71 — 2026-11-16
+
+**SukiSU-Nova 界面原样移植（可切换的第二套完整 UI）。** .70 的 SukiSU Ultra 风格只是主页换皮；本版按 .60 移植 KernelSU 界面的同一规格，把 SukiSU-Nova（原 SukiSU-Ultra）管理器的**整个 UI 层原样搬入**：主题系统、主页（含沉浸式布局与自定义背景）、设置全套（含主题商店、配色、自定义文字、应用图标、背景裁剪、关于、工具、SuSFS、扩展、内置 Zygisk 等子页）、底部栏与液态玻璃组件、导航框架，共 300+ 个上游文件逐字 vendored，数据层以接缝对接 RootSentinel 自身：
+
+- 入口：设置里原有的界面风格切换选「SukiSU Ultra 风格」后，整个应用外壳换成 SukiSU 的（底栏四页：主页 / 报告 / 历史 / 设置——报告与历史是 RootSentinel 自有页，底栏目的地按 .60 的做法做了标注式适配）；
+- SukiSU 主页的数据由接缝 ViewModel 喂 RootSentinel 的真实状态（版本、内核、系统信息、SELinux 状态走分层通道读法），更新卡不出现——应用更新仍走 RootSentinel 自己的校验更新器；
+- SukiSU 设置页底部追加一张 RootSentinel 的「界面皮肤」卡，可随时切回 KernelSU 风格；两套 UI 各自的设置互不干扰（SukiSU 设置存它自己的存储，RootSentinel 设置保持原样）；
+- root 功能页（超级用户、模块、刷写等）在 RootSentinel 里没有对应能力，按 .60 的处理原则保留界面、由接缝数据层呈现未就绪状态，不伪造功能；
+- 依赖栈新增 Coil、libsu、protobuf（payload 解析）等 SukiSU 同款依赖；手工流水线相应升级：Kotlin 编译目标 JVM 21、启用 parcelize 与 serialization 编译器插件、Kotlin/Java 混合编译（含 AIDL 生成的 zako 接口与 protoc 生成的 update_engine 类）。
+
+检测引擎、遥测与更新校验逻辑无变化。
+
 ## 2.22.70 — 2026-11-16
 
 **新增 SukiSU Ultra 界面风格（可切换）。** 设置中新增「SukiSU Ultra 风格」开关（在隐私与数据卡上方的新卡片里，Miuix / Material 两种模式下都有）。SukiSU 管理器（现已更名 SukiSU-Nova）的标志性主页是沉浸式布局，本版按其实现方式移植：

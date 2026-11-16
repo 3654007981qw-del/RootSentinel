@@ -19,8 +19,8 @@ NDK=$SDK/ndk/27.2.12479018
 JAVAC=/usr/lib/jvm/java-21-openjdk-amd64/bin/javac
 JAVA=/usr/lib/jvm/java-21-openjdk-amd64/bin/java
 APPID=com.rootsentinel
-VCODE=22270
-VNAME=2.22.70
+VCODE=22271
+VNAME=2.22.71
 # 本次构建的签名身份：rsbuild 的 rs.jks（AURORA 侧密钥）。
 # native 基线注入同一证书指纹，保证 I.APK_SIGNATURE 自洽。
 SIGNER_SHA=06377C87CB33D9AB1B0BAE330135AB67404AB96DEEA9F3584DDF2B2FFCDC7A06
@@ -72,7 +72,7 @@ PYEOF
   done
   for j in "$DEPS"/*.jar; do
     case "$(basename "$j")" in
-      *kotlin-compiler-embeddable*|*kotlin-compose-compiler*|*kotlin-reflect*) : ;;
+      *kotlin-compiler-embeddable*|*kotlin-compose-compiler*|*kotlin-reflect*|*kotlin-parcelize-compiler*|*kotlin-serialization-compiler*|*trove4j*) : ;;
       *) cp "$j" "$WORK/jars/" ;;
     esac
   done
@@ -170,12 +170,17 @@ stage_native() {
 stage_kotlin() {
   local CP="$AJAR:$WORK/r-classes"
   for j in "$WORK"/jars/*.jar; do CP="$CP:$j"; done
-  find "$SRC/app/src/main/java" -name '*.kt' > "$WORK/sources.txt"
+  # v2.22.71: .java sources (vendored SukiSU webui + AIDL output) join the
+  # kotlinc invocation for symbol resolution; their bytecode is emitted by
+  # the javac pass at the end of this stage (mixed compilation).
+  find "$SRC/app/src/main/java" \( -name '*.kt' -o -name '*.java' \) > "$WORK/sources.txt"
   wc -l < "$WORK/sources.txt"
   rm -rf "$WORK/kotlin-classes"
   mkdir -p "$WORK/kotlin-classes"
   local COMPILER_JAR=$(ls "$DEPS"/*kotlin-compiler-embeddable-*.jar | sort -V | tail -1)
   local PLUGIN_JAR=$(ls "$DEPS"/*kotlin-compose-compiler-plugin-embeddable-*.jar | sort -V | tail -1)
+  local PARCELIZE_JAR=$(ls "$DEPS"/*kotlin-parcelize-compiler-*.jar | sort -V | tail -1)
+  local SERIALIZE_JAR=$(ls "$DEPS"/*kotlin-serialization-compiler-plugin-embeddable-*.jar | sort -V | tail -1)
   local STDLIB_JAR=$(ls "$WORK"/jars/*kotlin-stdlib-2*.jar | sort -V | tail -1)
   local REFLECT_JAR=$(ls "$DEPS"/*kotlin-reflect-*.jar | sort -V | tail -1)
   local COROUTINES_JAR=$(ls "$WORK"/jars/*kotlinx-coroutines-core-jvm-*.jar | sort -V | tail -1)
@@ -185,7 +190,9 @@ stage_kotlin() {
     org.jetbrains.kotlin.cli.jvm.K2JVMCompiler \
     -cp "$CP" -d "$WORK/kotlin-classes" \
     -Xplugin="$PLUGIN_JAR" \
-    -jvm-target 17 -no-stdlib -no-reflect \
+    -Xplugin="$PARCELIZE_JAR" \
+    -Xplugin="$SERIALIZE_JAR" \
+    -jvm-target 21 -no-stdlib -no-reflect \
     -Xcontext-parameters -Xskip-metadata-version-check \
     -opt-in=androidx.compose.material3.ExperimentalMaterial3Api \
     -opt-in=androidx.compose.material3.ExperimentalMaterial3ExpressiveApi \
@@ -210,6 +217,14 @@ stage_kotlin() {
   if [ "$errs" != "0" ]; then echo "KOTLIN FAILED: $errs compile errors"; return 1; fi
   if [ -z "$(find "$WORK/kotlin-classes" -name '*.class' -print -quit)" ]; then
     echo "KOTLIN FAILED: no classes produced (compiler crash?)"; return 1
+  fi
+  # v2.22.71: emit bytecode for the .java sources now that the Kotlin
+  # classes they reference exist (e.g. SuFilePathHandler -> MonetColorsProvider).
+  local java_srcs
+  java_srcs=$(find "$SRC/app/src/main/java" -name '*.java')
+  if [ -n "$java_srcs" ]; then
+    "$JAVAC" -nowarn -cp "$CP:$WORK/kotlin-classes" -d "$WORK/kotlin-classes" $java_srcs || return 1
+    echo "java sources compiled: $(echo "$java_srcs" | wc -l)"
   fi
 }
 

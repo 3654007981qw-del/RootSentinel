@@ -166,6 +166,18 @@ fun RootApp(auto: String?, initialTab: Int, initialSub: String?) {
     val settings = remember {
         SettingsStore(ctx).also { SettingsRepositoryImpl.store = it }
     }
+    // v2.22.71: two-way sync between SettingsStore.uiSkin and the
+    // SkinBridge the vendored SukiSU settings card writes to.
+    LaunchedEffect(settings.uiSkin) {
+        if (com.rootsentinel.data.SkinBridge.uiSkin != settings.uiSkin) {
+            com.rootsentinel.data.SkinBridge.uiSkin = settings.uiSkin
+        }
+    }
+    LaunchedEffect(com.rootsentinel.data.SkinBridge.uiSkin) {
+        if (settings.uiSkin != com.rootsentinel.data.SkinBridge.uiSkin) {
+            settings.uiSkin = com.rootsentinel.data.SkinBridge.uiSkin
+        }
+    }
     val history = remember { HistoryStore(ctx) }
     val engine = remember { DetectorEngine(ctx) }
     val scan = remember { ScanState() }
@@ -547,7 +559,7 @@ fun RootApp(auto: String?, initialTab: Int, initialSub: String?) {
         } else {
             BackHandler { subPage = SubPage.NONE }
         }
-    } else if (pagerState.settledPage != 0) {
+    } else if (settings.uiSkin != "sukisu" && pagerState.settledPage != 0) {
         BackHandler { mainPagerState.animateToPage(0) }
     }
 
@@ -624,6 +636,15 @@ fun RootApp(auto: String?, initialTab: Int, initialSub: String?) {
                             SubPage.NONE -> Unit
                         }
                     }
+                } else if (settings.uiSkin == "sukisu") {
+                    // v2.22.71: SukiSU-Nova shell (vendored UI, RS pager data).
+                    SukisuShell(
+                        rsPageScale = settings.pageScale,
+                        reportState = reportState,
+                        reportActions = reportActions,
+                        historyEntries = history.entries,
+                        onClearHistory = { history.clear() },
+                    )
                 } else {
                     MainScreen(
                         mainPagerState = mainPagerState,
