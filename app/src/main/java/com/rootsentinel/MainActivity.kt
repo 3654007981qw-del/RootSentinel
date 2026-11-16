@@ -7,6 +7,9 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -360,6 +363,8 @@ fun RootApp(auto: String?, initialTab: Int, initialSub: String?) {
             fingerprint = Build.FINGERPRINT,
             selinuxStatus = selinuxStatus,
         ),
+        sukisuStyle = settings.uiSkin == "sukisu",
+        homeBgPath = settings.homeBgPath,
     )
     val homeActions = HomeActions(
         onScanClick = { if (!scan.scanning) startScan() },
@@ -440,11 +445,25 @@ fun RootApp(auto: String?, initialTab: Int, initialSub: String?) {
         onSetUseSoftReboot = {},
         onOpenAbout = { subPage = SubPage.ABOUT },
     )
+    // v2.22.70：SukiSU 风格主页背景图选择器（系统照片选择器，无需权限）；
+    // 选中后复制进应用私有目录并降采样，避免长期持有外部 Uri 授权。
+    val pickHomeBg = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                val saved = withContext(Dispatchers.IO) { importHomeBg(ctx, uri) }
+                if (saved != null) settings.homeBgPath = saved
+            }
+        }
+    }
     val rsPrivacy = RsPrivacyState(
         telemetryEnabled = settings.telemetryEnabled,
         crashUploadEnabled = settings.crashUploadEnabled,
         autoExport = settings.autoExport,
         keepHistory = settings.keepHistory,
+        uiSkin = settings.uiSkin,
+        hasCustomBg = settings.homeBgPath.isNotEmpty(),
     )
     val rsActions = RsSettingsActions(
         onSetTelemetryEnabled = { settings.telemetryEnabled = it },
@@ -456,6 +475,16 @@ fun RootApp(auto: String?, initialTab: Int, initialSub: String?) {
             updateController.checkManual(scope)
         },
         onOpenDevice = { subPage = SubPage.DEVICE },
+        onSetUiSkin = { settings.uiSkin = it },
+        onPickHomeBg = {
+            pickHomeBg.launch(
+                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+            )
+        },
+        onResetHomeBg = {
+            runCatching { java.io.File(settings.homeBgPath).delete() }
+            settings.homeBgPath = ""
+        },
     )
     val paletteState = ColorPaletteUiState(
         uiState = settingsUiState,
@@ -771,4 +800,29 @@ private fun MainScreen(
             }
         }
     }
+}
+
+/**
+ * v2.22.70：把用户自选的主页背景图复制进应用私有目录（降采样到宽 ≤1440，
+ * JPEG 88），返回保存路径；失败返回 null（设置保持不变）。
+ */
+private fun importHomeBg(ctx: android.content.Context, uri: android.net.Uri): String? {
+    return runCatching {
+        val resolver = ctx.contentResolver
+        val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        resolver.openInputStream(uri)?.use {
+            android.graphics.BitmapFactory.decodeStream(it, null, bounds)
+        }
+        var sample = 1
+        while (bounds.outWidth / sample > 1440) sample *= 2
+        val opts = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
+        val bmp = resolver.openInputStream(uri)?.use {
+            android.graphics.BitmapFactory.decodeStream(it, null, opts)
+        } ?: return null
+        val file = java.io.File(ctx.filesDir, "home_bg.jpg")
+        java.io.FileOutputStream(file).use { out ->
+            bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 88, out)
+        }
+        file.absolutePath
+    }.getOrNull()
 }

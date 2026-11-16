@@ -10,6 +10,6 @@ package com.rootsentinel
  * 同理由管线生成，两边永远一致。）
  */
 object RootSentinelVersion {
-    const val NAME = "2.22.69"
-    const val CODE = 22269
+    const val NAME = "2.22.70"
+    const val CODE = 22270
 }

@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material.icons.filled.Smartphone
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LayersClear
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Security
@@ -349,6 +350,44 @@ fun SettingPagerMaterial(
                     )
                 )
             }
+
+            // RootSentinel 扩展列：界面风格（v2.22.70，SukiSU Ultra 沉浸式主页）
+            SegmentedColumn(
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 13.dp),
+                content = buildList {
+                    add {
+                        SegmentedSwitchItem(
+                            icon = Icons.Filled.Palette,
+                            title = "SukiSU Ultra 风格",
+                            summary = "主页改为 SukiSU 沉浸式布局：整页背景图 + 半透明状态卡",
+                            checked = rsPrivacy.uiSkin == "sukisu",
+                            onCheckedChange = { rsActions.onSetUiSkin(if (it) "sukisu" else "ksu") }
+                        )
+                    }
+                    if (rsPrivacy.uiSkin == "sukisu") {
+                        add {
+                            SegmentedListItem(
+                                onClick = rsActions.onPickHomeBg,
+                                headlineContent = { Text("主页背景图") },
+                                supportingContent = { Text(if (rsPrivacy.hasCustomBg) "当前：自定义图片（点按更换）" else "当前：默认背景（点按自选图片）") },
+                                leadingContent = { Icon(Icons.Filled.Image, "主页背景图") },
+                                trailingContent = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null) }
+                            )
+                        }
+                        if (rsPrivacy.hasCustomBg) {
+                            add {
+                                SegmentedListItem(
+                                    onClick = rsActions.onResetHomeBg,
+                                    headlineContent = { Text("恢复默认背景") },
+                                    supportingContent = { Text("移除自定义图片") },
+                                    leadingContent = { Icon(Icons.Filled.RestartAlt, "恢复默认背景") },
+                                    trailingContent = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null) }
+                                )
+                            }
+                        }
+                    }
+                }
+            )
 
             // RootSentinel 扩展列：隐私与数据 / 更新 / 设备（同 RsSettingsExt.kt）
             SegmentedColumn(

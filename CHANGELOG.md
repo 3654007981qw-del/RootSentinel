@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.22.70 — 2026-11-16
+
+**新增 SukiSU Ultra 界面风格（可切换）。** 设置中新增「SukiSU Ultra 风格」开关（在隐私与数据卡上方的新卡片里，Miuix / Material 两种模式下都有）。SukiSU 管理器（现已更名 SukiSU-Nova）的标志性主页是沉浸式布局，本版按其实现方式移植：
+
+- 主页变为沉浸式：整页背景图铺满，状态卡与设备信息卡改为半透明（表面色 88% 不透明度，与 SukiSU 本体一致），顶栏透明，内容在背景之上滚动；
+- 内置一张默认背景图（深蓝紫极光渐变，1152×2048）；
+- 「主页背景图」可从系统照片选择器自选图片（复制进应用私有目录并降采样，不长期持有外部授权），也可一键恢复默认；
+- 与原有 Miuix / Material 渲染模式正交：两种模式下都可开启，关闭即回到 KernelSU 经典主页。
+
+实现说明：SukiSU 本体用 Coil 加载背景图，RootSentinel 的依赖栈没有 Coil，背景层用 BitmapFactory 直读（静态图无区别）；布局开关模型对应 SukiSU 设置里的 classic / immersive 主页布局。
+
 ## 2.22.69 — 2026-11-16
 
 **更新弹窗闪退的真因修复。** .66 上传的崩溃日志（服务器 crashes id 4）证明 .66 的 heightIn 修复没有根治：更新弹窗里渲染发行说明的 MarkdownContent 组件**自带一层 verticalScroll**，嵌套在弹窗的滚动列中时会被以无限高测量，抛 IllegalStateException——外层列加 heightIn 治不了，因为滚动容器给子项的约束永远是无限高。本版改为在弹窗里直接使用无滚动包装的 GithubMarkdown（WebView 不是 Compose 滚动容器，可安全嵌套）。此前 .64 的模板缺失、.66 的高度约束都是同一弹窗的叠加问题，本次为根因。

@@ -28,6 +28,7 @@ import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.LayersClear
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.SaveAlt
 import androidx.compose.material.icons.rounded.Smartphone
@@ -446,6 +447,58 @@ fun SettingPagerMiuix(
                                 show = showUninstallDialog.value,
                                 onDismissRequest = { showUninstallDialog.value = false }
                             )
+                        }
+                    }
+
+                    // RootSentinel 扩展卡：界面风格（v2.22.70，SukiSU Ultra 沉浸式主页）
+                    Card(
+                        modifier = Modifier
+                            .padding(top = 12.dp)
+                            .fillMaxWidth(),
+                    ) {
+                        SwitchPreference(
+                            title = "SukiSU Ultra 风格",
+                            summary = "主页改为 SukiSU 沉浸式布局：整页背景图 + 半透明状态卡",
+                            startAction = {
+                                Icon(
+                                    Icons.Rounded.Palette,
+                                    modifier = Modifier.padding(end = 6.dp),
+                                    contentDescription = "SukiSU Ultra 风格",
+                                    tint = colorScheme.onBackground
+                                )
+                            },
+                            checked = rsPrivacy.uiSkin == "sukisu",
+                            onCheckedChange = { rsActions.onSetUiSkin(if (it) "sukisu" else "ksu") }
+                        )
+                        if (rsPrivacy.uiSkin == "sukisu") {
+                            ArrowPreference(
+                                title = "主页背景图",
+                                summary = if (rsPrivacy.hasCustomBg) "当前：自定义图片（点按更换）" else "当前：默认背景（点按自选图片）",
+                                startAction = {
+                                    Icon(
+                                        Icons.Rounded.Image,
+                                        modifier = Modifier.padding(end = 6.dp),
+                                        contentDescription = "主页背景图",
+                                        tint = colorScheme.onBackground
+                                    )
+                                },
+                                onClick = rsActions.onPickHomeBg
+                            )
+                            if (rsPrivacy.hasCustomBg) {
+                                ArrowPreference(
+                                    title = "恢复默认背景",
+                                    summary = "移除自定义图片",
+                                    startAction = {
+                                        Icon(
+                                            Icons.Rounded.RestartAlt,
+                                            modifier = Modifier.padding(end = 6.dp),
+                                            contentDescription = "恢复默认背景",
+                                            tint = colorScheme.onBackground
+                                        )
+                                    },
+                                    onClick = rsActions.onResetHomeBg
+                                )
+                            }
                         }
                     }
 

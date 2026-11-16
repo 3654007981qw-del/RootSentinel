@@ -14,6 +14,9 @@ data class RsPrivacyState(
     val crashUploadEnabled: Boolean,
     val autoExport: Boolean,
     val keepHistory: Boolean,
+    // v2.22.70: 界面皮肤（"ksu" / "sukisu"）与主页背景图状态
+    val uiSkin: String,
+    val hasCustomBg: Boolean,
 )
 
 @Immutable
@@ -24,4 +27,8 @@ data class RsSettingsActions(
     val onSetKeepHistory: (Boolean) -> Unit,
     val onCheckUpdateClick: () -> Unit,
     val onOpenDevice: () -> Unit,
+    // v2.22.70
+    val onSetUiSkin: (String) -> Unit,
+    val onPickHomeBg: () -> Unit,
+    val onResetHomeBg: () -> Unit,
 )

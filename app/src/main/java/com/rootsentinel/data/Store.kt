@@ -159,6 +159,29 @@ class SettingsStore(context: Context) {
             sp.edit().putString("uiMode", v).apply()
         }
 
+    /**
+     * 界面皮肤（v2.22.70）："ksu"（默认）或 "sukisu"（SukiSU Ultra 风格）。
+     * 与 uiMode（miuix/material 渲染模式）正交：sukisu 时主页改为 SukiSU
+     * 的沉浸式布局——整页背景图 + 半透明状态卡（仿 SukiSU 管理器的
+     * classic/immersive 主页布局开关）。RootApp/HomePager 真实消费。
+     */
+    private var _uiSkin by mutableStateOf(sp.getString("uiSkin", "ksu") ?: "ksu")
+    var uiSkin: String
+        get() = _uiSkin
+        set(v) {
+            _uiSkin = v
+            sp.edit().putString("uiSkin", v).apply()
+        }
+
+    /** SukiSU 风格主页的自定义背景图（filesDir 内副本路径）；"" = 内置默认图。 */
+    private var _homeBgPath by mutableStateOf(sp.getString("homeBgPath", "") ?: "")
+    var homeBgPath: String
+        get() = _homeBgPath
+        set(v) {
+            _homeBgPath = v
+            sp.edit().putString("homeBgPath", v).apply()
+        }
+
     /** 深色模式（v2.22.59）：0 跟随系统 / 1 浅色 / 2 深色。RootApp 真实消费。 */
     private var _colorMode by mutableStateOf(sp.getInt("colorMode", 0))
     var colorMode: Int

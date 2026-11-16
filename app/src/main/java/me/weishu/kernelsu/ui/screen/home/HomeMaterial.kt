@@ -10,6 +10,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -81,9 +82,12 @@ fun HomePagerMaterial(
         topBar = { TopBar(scrollBehavior = scrollBehavior) },
         contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)
     ) { innerPadding ->
-        Column(
+        Box(modifier = Modifier.padding(innerPadding)) {
+            if (state.sukisuStyle) {
+                HomeBackgroundImage(state.homeBgPath)
+            }
+            Column(
             modifier = Modifier
-                .padding(innerPadding)
                 .nestedScroll(scrollBehavior.nestedScrollConnection)
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp),
@@ -113,6 +117,7 @@ fun HomePagerMaterial(
                         WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() else 0.dp
                 )
             )
+            }
         }
     }
 }
@@ -190,7 +195,7 @@ private fun StatusCard(
 
         Surface(
             modifier = Modifier.fillMaxWidth(),
-            color = containerColor,
+            color = if (state.sukisuStyle) containerColor.copy(alpha = 0.88f) else containerColor,
             contentColor = contentColor,
             shape = MaterialTheme.shapes.large,
             onClick = onClick ?: {},

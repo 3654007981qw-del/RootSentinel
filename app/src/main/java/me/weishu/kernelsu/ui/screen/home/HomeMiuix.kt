@@ -97,7 +97,7 @@ fun HomePagerMiuix(
     val enableBlur = LocalEnableBlur.current
     val backdrop = rememberBlurBackdrop(enableBlur)
     val blurActive = backdrop != null
-    val barColor = if (blurActive) Color.Transparent else colorScheme.surface
+    val barColor = if (blurActive || state.sukisuStyle) Color.Transparent else colorScheme.surface
     Scaffold(
         topBar = {
             TopBar(
@@ -110,6 +110,9 @@ fun HomePagerMiuix(
         contentWindowInsets = WindowInsets.systemBars.add(WindowInsets.displayCutout).only(WindowInsetsSides.Horizontal)
     ) { innerPadding ->
         Box(modifier = if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier) {
+            if (state.sukisuStyle) {
+                HomeBackgroundImage(state.homeBgPath)
+            }
             LazyColumn(
                 modifier = Modifier
                     .fillMaxHeight()
@@ -145,6 +148,7 @@ fun HomePagerMiuix(
                         InfoCard(
                             systemInfo = state.systemInfo,
                             modifier = Modifier.fillMaxWidth(),
+                            sukisuStyle = state.sukisuStyle,
                         )
                         SupportLinks(
                             onOpenUrl = actions.onOpenUrl,
@@ -204,11 +208,18 @@ private fun StatusCard(
     state: HomeUiState,
     actions: HomeActions,
 ) {
+    // v2.22.70：SukiSU 沉浸模式下状态卡半透明（SukiSU 本体取 surface 0.88 alpha）
+    val cardColors = if (state.sukisuStyle) {
+        CardDefaults.defaultColors(color = colorScheme.surfaceContainer.copy(alpha = 0.88f))
+    } else {
+        CardDefaults.defaultColors()
+    }
     Column {
         when {
             state.scanning -> {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
+                    colors = cardColors,
                 ) {
                     BasicComponent(
                         title = "正在扫描",
@@ -227,6 +238,7 @@ private fun StatusCard(
             !state.hasResult -> {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
+                    colors = cardColors,
                     onClick = actions.onScanClick,
                     pressFeedbackType = PressFeedbackType.Tilt,
                 ) {
@@ -248,6 +260,7 @@ private fun StatusCard(
             state.gradeKind == 4 -> {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
+                    colors = cardColors,
                     onClick = actions.onReportClick,
                     pressFeedbackType = PressFeedbackType.Tilt,
                 ) {
@@ -305,7 +318,7 @@ private fun StatusCard(
                 ) {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.defaultColors(color = cardColor),
+                        colors = CardDefaults.defaultColors(color = if (state.sukisuStyle) cardColor.copy(alpha = 0.88f) else cardColor),
                         onClick = actions.onReportClick,
                         pressFeedbackType = PressFeedbackType.Tilt,
                     ) {
@@ -389,6 +402,7 @@ private fun SupportLinks(
 private fun InfoCard(
     systemInfo: SystemInfo,
     modifier: Modifier = Modifier,
+    sukisuStyle: Boolean = false,
 ) {
     @Composable
     fun InfoText(
@@ -439,7 +453,14 @@ private fun InfoCard(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Card(modifier = Modifier.fillMaxWidth()) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = if (sukisuStyle) {
+                CardDefaults.defaultColors(color = colorScheme.surfaceContainer.copy(alpha = 0.88f))
+            } else {
+                CardDefaults.defaultColors()
+            },
+        ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 InfoText(
                     icon = Icons.Filled.Tag,
@@ -464,7 +485,14 @@ private fun InfoCard(
                 )
             }
         }
-        Card(modifier = Modifier.fillMaxWidth()) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = if (sukisuStyle) {
+                CardDefaults.defaultColors(color = colorScheme.surfaceContainer.copy(alpha = 0.88f))
+            } else {
+                CardDefaults.defaultColors()
+            },
+        ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 InfoText(
                     icon = Icons.Filled.Security,
