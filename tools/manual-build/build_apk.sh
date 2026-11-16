@@ -19,8 +19,8 @@ NDK=$SDK/ndk/27.2.12479018
 JAVAC=/usr/lib/jvm/java-21-openjdk-amd64/bin/javac
 JAVA=/usr/lib/jvm/java-21-openjdk-amd64/bin/java
 APPID=com.rootsentinel
-VCODE=22267
-VNAME=2.22.67
+VCODE=22268
+VNAME=2.22.68
 # 本次构建的签名身份：rsbuild 的 rs.jks（AURORA 侧密钥）。
 # native 基线注入同一证书指纹，保证 I.APK_SIGNATURE 自洽。
 SIGNER_SHA=06377C87CB33D9AB1B0BAE330135AB67404AB96DEEA9F3584DDF2B2FFCDC7A06

@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.22.68 — 2026-11-16
+
+**设备信息页的 SELinux 显示改走分层通道。** .67 的金丝雀推断已经让检测项 F.SELINUX_ENFORCE 在 vivo 上判定通过（真机报告未知数 36 → 34），但「设备信息」页那一行是独立的原始读法——直读 `/sys/fs/selinux/enforce` 文件，在 selinuxfs 被厂商关闭的机型上永远失败、恒显示 Unknown，与检测结论对不上。本版把该行改为与原生检测相同的通道顺序：enforce 文件 → status 状态页 → 金丝雀推断（stat 核对权限位后 access 被拒 ⇒ Enforcing，标注「（推断）」）。检测引擎本身无变化。
+
 ## 2.22.67 — 2026-11-16
 
 **SELinux 状态：金丝雀推断（仿 KernelSU 的无 root 读法）。** .66 实测确认部分厂商（如 vivo）把整个 selinuxfs 对应用域全关：enforce 文件、status 状态页（read 与 mmap 都试过）、booleans、对象类目录全部拒绝，F.SELINUX_ENFORCE 只能报未知。KernelSU 管理器的 SELinuxChecker 给了思路：它跑系统 `getenforce` 命令，无 root 时若被 Permission denied 就判定 Enforcing——Permissive 模式下 SELinux 的拒绝只记日志、不拦截，能真正拦住操作就说明强制执行在生效。本版把这个推断引进原生层并把前提做严谨：先用 stat 核对节点权限位，确认「按 DAC 本应用可读、且属主不是自己」之后，访问仍被 EACCES/EPERM 拦下，才推断 Enforcing（结论带 via=canary 标记与推断说明）；DAC 本身不给读的机型不参与推断，继续报未知，不硬猜。F.SELINUX_POLICY 随 enforce 确认同步受益。

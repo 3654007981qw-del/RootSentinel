@@ -765,11 +765,43 @@ fun DetailScreenMaterial(item: Evidence, onBack: () -> Unit) {
 
 // ------------------------------------------------------------------ 设备页
 
+// v2.22.68：设备页的 SELinux 显示改走与原生检测相同的分层通道。
+// 此前这里直读 /sys/fs/selinux/enforce——部分厂商（如 vivo）把整个
+// selinuxfs 对应用域关闭，直读永远失败、恒显示 Unknown，与检测
+// 结论（.67 起金丝雀推断已判定通过）不一致，反而误导用户。
+// 通道顺序：enforce 文件 → status 状态页（u32 @8）→ 金丝雀推断
+// （stat 核对 DAC 权限位后，access 被 EACCES/EPERM 拒绝 ⇒
+// Permissive 只记日志不拦截，能真拦住即 Enforcing）。
+fun selinuxStatusText(): String {
+    runCatching { java.io.File("/sys/fs/selinux/enforce").readText().trim() }
+        .getOrNull()?.let { if (it == "1") return "Enforcing"; if (it == "0") return "Permissive" }
+    runCatching {
+        val b = java.io.File("/sys/fs/selinux/status").readBytes()
+        if (b.size >= 12) {
+            val flag = (b[8].toInt() and 0xFF) or ((b[9].toInt() and 0xFF) shl 8) or
+                ((b[10].toInt() and 0xFF) shl 16) or ((b[11].toInt() and 0xFF) shl 24)
+            if (flag == 1) return "Enforcing"
+            if (flag == 0) return "Permissive"
+        }
+    }
+    for (path in listOf("/sys/fs/selinux/enforce", "/sys/fs/selinux/status")) {
+        val st = runCatching { android.system.Os.stat(path) }.getOrNull() ?: continue
+        if (st.st_mode and android.system.OsConstants.S_IROTH == 0) continue
+        if (st.st_uid == android.system.Os.getuid()) continue
+        val denied = runCatching {
+            android.system.Os.access(path, android.system.OsConstants.R_OK); false
+        }.getOrElse { e ->
+            val errno = (e as? android.system.ErrnoException)?.errno ?: -1
+            errno == android.system.OsConstants.EACCES || errno == android.system.OsConstants.EPERM
+        }
+        if (denied) return "Enforcing（推断）"
+    }
+    return "Unknown"
+}
+
 fun deviceInfoRows(): List<Pair<String, String>> {
     val uname = runCatching { android.system.Os.uname() }.getOrNull()
-    val selinux = runCatching {
-        java.io.File("/sys/fs/selinux/enforce").readText().trim()
-    }.getOrNull()
+    val selinux = selinuxStatusText()
     return listOf(
         "品牌" to Build.BRAND,
         "型号" to Build.MODEL,
@@ -785,11 +817,7 @@ fun deviceInfoRows(): List<Pair<String, String>> {
         "构建类型" to Build.TYPE,
         "构建标签" to Build.TAGS,
         "支持的 ABI" to Build.SUPPORTED_ABIS.joinToString(", "),
-        "SELinux" to when (selinux) {
-            "1" -> "Enforcing"
-            "0" -> "Permissive"
-            else -> "Unknown"
-        },
+        "SELinux" to selinux,
     )
 }
 
