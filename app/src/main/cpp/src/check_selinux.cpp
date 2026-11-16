@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <sys/stat.h>
 #include <sys/mman.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -57,6 +58,7 @@ void checkSelinux(ScanReport& r) {
     const std::string enforceFile = trim(readFile(RSs("/sys/fs/selinux/enforce")));
     std::string enforce = enforceFile;
     bool enforceViaStatus = false;
+    bool enforceViaCanary = false;
     if (enforce != "1" && enforce != "0") {
         // v2.22.66：status 页是为 mmap 设计的接口（libselinux 的
         // selinux_status_open 就是 open + mmap），部分内核对它
@@ -88,11 +90,42 @@ void checkSelinux(ScanReport& r) {
             }
         }
     }
+    if (enforce != "1" && enforce != "0") {
+        // v2.22.67 金丝雀推断（思路来自 KernelSU 管理器的
+        // SELinuxChecker：它跑 getenforce，被 Permission denied 时
+        // 判定 Enforcing——无需 root。这里把前提做严谨）：
+        //   Permissive 模式下 SELinux 的拒绝只记日志、不拦截，
+        //   被拒的操作会成功放行。所以若某节点「按 DAC 权限位，
+        //   本进程本可读」（stat 显示 other 可读、且属主不是自己）
+        //   却仍被 EACCES/EPERM 实际拦下，拦截只可能来自正在
+        //   生效的 MAC —— 即 Enforcing（至少对本应用域成立）。
+        //   DAC 本身不给读的节点不参与推断，避免把普通文件
+        //   权限不足误判成 Enforcing。
+        auto canaryDenied = [](const std::string& path) -> bool {
+            struct stat st {};
+            if (stat(path.c_str(), &st) != 0) return false;
+            if ((st.st_mode & S_IROTH) == 0) return false;
+            if (st.st_uid == getuid()) return false;
+            const int e = accessErrnoRaw(path, R_OK);
+            return e == EACCES || e == EPERM;
+        };
+        if (canaryDenied(RSs("/sys/fs/selinux/enforce")) ||
+            canaryDenied(RSs("/sys/fs/selinux/status"))) {
+            enforce = "1";
+            enforceViaCanary = true;
+        }
+    }
     if (enforce == "1") {
         Evidence e = makePass(RSs("F.SELINUX_ENFORCE"), Category::SELINUX,
                               RSs("SELinux = Enforcing"));
         e.addVector(RSs("enforce"), enforce);
         if (enforceViaStatus) e.addVector(RSs("via"), RSs("/sys/fs/selinux/status"));
+        if (enforceViaCanary) {
+            e.addVector(RSs("via"), RSs("canary"));
+            e.detail = RSs("enforce/status 节点按权限位本应用可读，却被实际拒绝——"
+                           "Permissive 模式下 SELinux 拒绝只记日志、不拦截，"
+                           "能真正拦住说明 Enforcing 正在生效");
+        }
         r.add(std::move(e));
     } else if (enforce == "0") {
         Evidence e = makeHit(RSs("F.SELINUX_ENFORCE"), Category::SELINUX,
@@ -140,7 +173,7 @@ void checkSelinux(ScanReport& r) {
         // F.SELINUX_ENFORCE 单独记录，这里不会掩盖 Permissive 命中。
         if (enforce == "1") {
             r.add(makePass(RSs("F.SELINUX_POLICY"), Category::SELINUX,
-                           RSs("SELinux policy 不可读（Enforcing 已实测确认，符合加固预期）")));
+                           RSs("SELinux policy 不可读（Enforcing 已确认，符合加固预期）")));
         } else {
             r.add(makeUnknown(RSs("F.SELINUX_POLICY"), Category::SELINUX,
                               Severity::LOW,

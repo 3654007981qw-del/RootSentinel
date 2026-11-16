@@ -133,14 +133,14 @@ void checkEnv(ScanReport& r) {
             e.addVector(RSs("AT_SECURE"), std::to_string(secure));
             if (viaGetauxval) e.addVector(RSs("via"), RSs("getauxval"));
             else e.addVector(RSs("entries"), std::to_string(n));
-            if (secure != 0) {
-                e.verdict = Verdict::HIT;
-                e.severity = Severity::LOW;
-                e.confidence = Confidence::LOW;
-                e.heuristic = true;
-                e.title = RSs("AT_SECURE != 0（进程处于安全执行模式）");
-                e.fp_note = RSs("setuid 程序正常会有该标志；普通 App 通常为 0");
-            }
+            // v2.22.67 口径校准：AT_SECURE 在 Android 上恒为 1 是
+            // 常态——app_process 执行时发生 SELinux 域切换，内核
+            // 据此置 secureexec，zygote 孵化的每个 App 都继承。
+            // 旧口径把它记为低置信 HIT，在任何真机上都会常亮，
+            // 属于口径错误而非设备异常；.66 通道打通后该 HIT 在
+            // 真机报告里出现，故在此修正：只记录向量，不再翻转
+            // 结论。（此项其余语义不变。）
+            (void)secure;
             r.add(std::move(e));
 
             if (!execfn.empty()) {

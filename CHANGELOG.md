@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.22.67 — 2026-11-16
+
+**SELinux 状态：金丝雀推断（仿 KernelSU 的无 root 读法）。** .66 实测确认部分厂商（如 vivo）把整个 selinuxfs 对应用域全关：enforce 文件、status 状态页（read 与 mmap 都试过）、booleans、对象类目录全部拒绝，F.SELINUX_ENFORCE 只能报未知。KernelSU 管理器的 SELinuxChecker 给了思路：它跑系统 `getenforce` 命令，无 root 时若被 Permission denied 就判定 Enforcing——Permissive 模式下 SELinux 的拒绝只记日志、不拦截，能真正拦住操作就说明强制执行在生效。本版把这个推断引进原生层并把前提做严谨：先用 stat 核对节点权限位，确认「按 DAC 本应用可读、且属主不是自己」之后，访问仍被 EACCES/EPERM 拦下，才推断 Enforcing（结论带 via=canary 标记与推断说明）；DAC 本身不给读的机型不参与推断，继续报未知，不硬猜。F.SELINUX_POLICY 随 enforce 确认同步受益。
+
+**I.AUXV 口径校准**：AT_SECURE 在 Android 上恒为 1 是常态（app_process 执行时 SELinux 域切换触发 secureexec，zygote 孵化的每个 App 都继承），旧口径把它记为低置信命中属于口径错误——.66 通道打通后该命中在真机报告里出现，本版修正为只记录向量、不再翻转结论。
+
 ## 2.22.66 — 2026-11-16
 
 **「未知」专项：给读不到的检查项加更底层的通道。** 上一版真机报告 226 项里有 45 项落「无法判定」，逐项审计后确认其中一批不是权限死墙、只是通道选错了，本版逐项换通道（判定口径不变，不把未知硬说成正常）：
