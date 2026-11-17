@@ -748,6 +748,8 @@ fun SettingPagerMiuix(
                     RsSkinCardMiuix()
                     // RootSentinel seam (v2.22.76): RS privacy toggles.
                     RsPrivacyCardMiuix()
+                    // v2.22.80: switch to the bundled real manager.
+                    RsManagerCardMiuix()
                     Spacer(Modifier.height(bottomInnerPadding))
                 }
             }

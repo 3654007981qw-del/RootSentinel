@@ -27,6 +27,8 @@ data class RsSettingsActions(
     val onSetKeepHistory: (Boolean) -> Unit,
     val onCheckUpdateClick: () -> Unit,
     val onOpenDevice: () -> Unit,
+    // v2.22.80
+    val onSwitchToManager: () -> Unit,
     // v2.22.70
     val onSetUiSkin: (String) -> Unit,
     val onPickHomeBg: () -> Unit,

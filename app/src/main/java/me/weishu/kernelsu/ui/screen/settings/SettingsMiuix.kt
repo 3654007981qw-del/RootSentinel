@@ -591,6 +591,19 @@ fun SettingPagerMiuix(
                             },
                             onClick = rsActions.onOpenDevice
                         )
+                        ArrowPreference(
+                            title = "切换到管理器",
+                            summary = "打开 vivo 版 KernelSU 管理器，未装时用内置副本安装",
+                            startAction = {
+                                Icon(
+                                    Icons.Rounded.AdminPanelSettings,
+                                    modifier = Modifier.padding(end = 6.dp),
+                                    contentDescription = "切换到管理器",
+                                    tint = colorScheme.onBackground
+                                )
+                            },
+                            onClick = rsActions.onSwitchToManager
+                        )
                     }
 
                     Card(

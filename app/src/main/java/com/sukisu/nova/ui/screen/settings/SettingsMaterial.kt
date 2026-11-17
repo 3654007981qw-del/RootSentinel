@@ -592,6 +592,8 @@ fun SettingPagerMaterial(
             RsSkinCardMaterial()
             // RootSentinel seam (v2.22.76): RS privacy toggles.
             RsPrivacyCardMaterial()
+            // v2.22.80: switch to the bundled real manager.
+            RsManagerCardMaterial()
             Spacer(modifier = Modifier.height(bottomInnerPadding))
         }
     }

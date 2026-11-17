@@ -446,6 +446,15 @@ fun SettingPagerMaterial(
                             leadingContent = { Icon(Icons.Filled.Smartphone, "设备信息") },
                             trailingContent = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null) }
                         )
+                    },
+                    {
+                        SegmentedListItem(
+                            onClick = rsActions.onSwitchToManager,
+                            headlineContent = { Text("切换到管理器") },
+                            supportingContent = { Text("打开 vivo 版 KernelSU 管理器，未装时用内置副本安装") },
+                            leadingContent = { Icon(Icons.Filled.AdminPanelSettings, "切换到管理器") },
+                            trailingContent = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null) }
+                        )
                     }
                 )
             )

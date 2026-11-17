@@ -473,6 +473,55 @@ fun RootApp(auto: String?, initialTab: Int, initialSub: String?) {
         onOpenItem = { e -> detail = e; subPage = SubPage.DETAIL },
     )
 
+    // v2.22.80: switch to the bundled vivo KernelSU manager —
+    // launch it when installed; otherwise extract the bundled
+    // APK (assets/manager/vivoksu.apk) into the updater's
+    // FileProvider directory and hand it to the system
+    // installer. The manager keeps its own package + KernelSU
+    // signing identity; RootSentinel only carries it.
+    val switchToManager: () -> Unit = {
+        val pkg = "me.inkdye.vivoksu"
+        val launch = ctx.packageManager.getLaunchIntentForPackage(pkg)
+        if (launch != null) {
+            runCatching {
+                ctx.startActivity(launch.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+            }.onFailure {
+                Toast.makeText(ctx, "打开管理器失败", Toast.LENGTH_SHORT).show()
+            }
+        } else {
+            scope.launch {
+                val uri = withContext(Dispatchers.IO) {
+                    runCatching {
+                        val dir = java.io.File(ctx.cacheDir, "updates").apply { mkdirs() }
+                        val out = java.io.File(dir, "vivoksu.apk")
+                        ctx.assets.open("manager/vivoksu.apk").use { input ->
+                            out.outputStream().use { input.copyTo(it) }
+                        }
+                        androidx.core.content.FileProvider.getUriForFile(
+                            ctx, "com.rootsentinel.fileprovider", out,
+                        )
+                    }.getOrNull()
+                }
+                if (uri == null) {
+                    Toast.makeText(ctx, "读取内置管理器失败", Toast.LENGTH_SHORT).show()
+                } else {
+                    runCatching {
+                        ctx.startActivity(
+                            android.content.Intent(android.content.Intent.ACTION_VIEW)
+                                .setDataAndType(uri, "application/vnd.android.package-archive")
+                                .addFlags(
+                                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                                        android.content.Intent.FLAG_ACTIVITY_NEW_TASK,
+                                ),
+                        )
+                    }.onFailure {
+                        Toast.makeText(ctx, "调起管理器安装失败", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        }
+    }
+
     // v2.22.76: feed the SukiSU home page's RS scan card (ScanBridge).
     SideEffect {
         com.rootsentinel.data.ScanBridge.scanning = scan.scanning
@@ -493,6 +542,8 @@ fun RootApp(auto: String?, initialTab: Int, initialSub: String?) {
         com.rootsentinel.data.ExportBridge.onExport = reportActions.onExport
         // v2.22.79: SukiSU About page's manual update check.
         com.rootsentinel.data.UpdateBridge.onCheckManual = { updateController.checkManual(scope) }
+        // v2.22.80: switch-to-manager for the SukiSU settings card.
+        com.rootsentinel.data.ManagerBridge.onSwitch = switchToManager
     }
 
     val settingsActions = SettingsScreenActions(
@@ -545,6 +596,7 @@ fun RootApp(auto: String?, initialTab: Int, initialSub: String?) {
             updateController.checkManual(scope)
         },
         onOpenDevice = { subPage = SubPage.DEVICE },
+        onSwitchToManager = switchToManager,
         onSetUiSkin = { settings.uiSkin = it },
         onPickHomeBg = {
             pickHomeBg.launch(
