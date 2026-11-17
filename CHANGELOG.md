@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.22.81 — 2026-11-17
+
+**「切换到管理器」改为优先静默安装；GitHub CI 修复转绿。** 点「切换到管理器」时若管理器未装，RootSentinel 先尝试用 root 权限静默安装内置副本（无系统安装框、不用碰安装包，装完直接打开管理器）；没有 root 授权时才退回系统安装框。另：CI 自 v2.22.71 起因 Gradle 依赖清单未随 SukiSU 界面移植更新而持续失败，本版将 Gradle 依赖与手动管线对齐（补 core-splashscreen、protobuf、serialization/parcelize 插件、libsu、coil 等），main 已恢复绿色；发版仍走手动管线。
+
+
 ## 2.22.80 — 2026-11-17
 
 **内置 vivo 版 KernelSU 管理器，设置里一键切换。** 本版起 RootSentinel 安装包内自带用户提供的 vivo 版 KernelSU 管理器（me.inkdye.vivoksu，vivo-196-g0760b7c5）。两种外壳的设置里都新增「切换到管理器」：管理器已装时直接打开；未装时从内置副本调起系统安装，装好再点一次即可打开。说明：管理器必须保持它自己的包名与 KernelSU 签名才能被内核认领，所以无法与检测器真正合并成同一个应用身份——它以独立应用落地，但随 RootSentinel 一起分发，不再需要单独找安装包。代价：安装包体积增加约 13.7 MB。
