@@ -593,7 +593,7 @@ fun SettingPagerMiuix(
                         )
                         ArrowPreference(
                             title = "切换到管理器",
-                            summary = "打开 vivo 版 KernelSU 管理器，未装时用内置副本安装",
+                            summary = "打开 vivo 版 KernelSU 管理器，未装时自动安装内置副本",
                             startAction = {
                                 Icon(
                                     Icons.Rounded.AdminPanelSettings,

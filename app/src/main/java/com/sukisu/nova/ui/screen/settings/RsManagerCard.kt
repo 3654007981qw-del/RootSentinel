@@ -36,7 +36,7 @@ fun RsManagerCardMiuix() {
     ) {
         BasicComponent(
             title = "切换到管理器",
-            summary = "打开 vivo 版 KernelSU 管理器，未装时用内置副本安装",
+            summary = "打开 vivo 版 KernelSU 管理器，未装时自动安装内置副本",
             onClick = { ManagerBridge.onSwitch?.invoke() },
             endActions = {
                 MiuixIcon(
@@ -58,7 +58,7 @@ fun RsManagerCardMaterial() {
                 SegmentedListItem(
                     onClick = { ManagerBridge.onSwitch?.invoke() },
                     headlineContent = { Text("切换到管理器") },
-                    supportingContent = { Text("打开 vivo 版 KernelSU 管理器，未装时用内置副本安装") },
+                    supportingContent = { Text("打开 vivo 版 KernelSU 管理器，未装时自动安装内置副本") },
                     leadingContent = { Icon(Icons.Filled.AdminPanelSettings, null) },
                     trailingContent = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null) },
                 )

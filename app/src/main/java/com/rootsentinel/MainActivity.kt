@@ -490,21 +490,56 @@ fun RootApp(auto: String?, initialTab: Int, initialSub: String?) {
             }
         } else {
             scope.launch {
-                val uri = withContext(Dispatchers.IO) {
+                val apkFile = withContext(Dispatchers.IO) {
                     runCatching {
                         val dir = java.io.File(ctx.cacheDir, "updates").apply { mkdirs() }
                         val out = java.io.File(dir, "vivoksu.apk")
                         ctx.assets.open("manager/vivoksu.apk").use { input ->
                             out.outputStream().use { input.copyTo(it) }
                         }
-                        androidx.core.content.FileProvider.getUriForFile(
-                            ctx, "com.rootsentinel.fileprovider", out,
-                        )
+                        out
                     }.getOrNull()
                 }
-                if (uri == null) {
+                if (apkFile == null) {
                     Toast.makeText(ctx, "读取内置管理器失败", Toast.LENGTH_SHORT).show()
+                    return@launch
+                }
+                // v2.22.81: try a silent root install first — one
+                // tap, no installer UI, no package file to handle.
+                // Falls back to the system installer when
+                // RootSentinel has no root grant.
+                val silent = withContext(Dispatchers.IO) {
+                    runCatching {
+                        val cmd = "cp ${apkFile.absolutePath} /data/local/tmp/vivoksu.apk && " +
+                            "pm install -r /data/local/tmp/vivoksu.apk; " +
+                            "rm -f /data/local/tmp/vivoksu.apk"
+                        val proc = ProcessBuilder("su", "-c", cmd)
+                            .redirectErrorStream(true)
+                            .start()
+                        val sb = StringBuilder()
+                        val drain = Thread {
+                            runCatching {
+                                proc.inputStream.bufferedReader().forEachLine { sb.append(it) }
+                            }
+                        }
+                        drain.start()
+                        val finished = proc.waitFor(90, java.util.concurrent.TimeUnit.SECONDS)
+                        if (!finished) proc.destroyForcibly()
+                        drain.join(1000)
+                        finished && sb.contains("Success")
+                    }.getOrDefault(false)
+                }
+                if (silent) {
+                    Toast.makeText(ctx, "管理器已装好", Toast.LENGTH_SHORT).show()
+                    ctx.packageManager.getLaunchIntentForPackage(pkg)?.let { li ->
+                        runCatching {
+                            ctx.startActivity(li.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                        }
+                    }
                 } else {
+                    val uri = androidx.core.content.FileProvider.getUriForFile(
+                        ctx, "com.rootsentinel.fileprovider", apkFile,
+                    )
                     runCatching {
                         ctx.startActivity(
                             android.content.Intent(android.content.Intent.ACTION_VIEW)

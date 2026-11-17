@@ -1,6 +1,10 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
+    // v2.22.81: see root build.gradle.kts — the vendored SukiSU
+    // code needs both compiler plugins under Gradle too.
+    id("org.jetbrains.kotlin.plugin.serialization")
+    id("org.jetbrains.kotlin.plugin.parcelize")
 }
 
 // ---------------------------------------------------------------- 签名凭据
@@ -169,12 +173,14 @@ android {
     }
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
+        // v2.22.81: aligned with the manual pipeline (JVM 21 —
+        // miuix-nav's inline bytecode is class-file v65).
+        sourceCompatibility = JavaVersion.VERSION_21
+        targetCompatibility = JavaVersion.VERSION_21
     }
     kotlin {
         compilerOptions {
-            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21)
             // backdrop 库用了 Kotlin 2.2 的 context parameters
             freeCompilerArgs.add("-Xcontext-parameters")
             // 与手动流水线一致的实验 API 全局 opt-in（KSU 移植代码
@@ -234,6 +240,33 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.11.0")
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
+
+    // v2.22.81: dependencies the .71 SukiSU vendor brought in.
+    // The manual pipeline has carried these in deps2 all along;
+    // the Gradle list was never updated, which is why CI has
+    // been red since .71. Versions match deps2/resolved.txt.
+    implementation("androidx.core:core-splashscreen:1.2.0")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.11.0")
+    implementation("androidx.lifecycle:lifecycle-livedata-core:2.11.0")
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
+    implementation("androidx.compose.ui:ui-tooling-preview")
+    implementation("com.google.protobuf:protobuf-javalite:4.36.2")
+    implementation("com.google.protobuf:protobuf-kotlin-lite:4.36.2")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
+    implementation("com.github.topjohnwu.libsu:core:6.0.0")
+    implementation("com.github.topjohnwu.libsu:service:6.0.0")
+    implementation("com.github.topjohnwu.libsu:io:6.0.0")
+    implementation("io.coil-kt:coil-compose:2.7.0")
+    implementation("me.zhanghai.android.appiconloader:appiconloader:1.5.0")
+    implementation("org.lsposed.hiddenapibypass:hiddenapibypass:6.1")
+    implementation("org.apache.commons:commons-compress:1.28.0")
+    implementation("org.tukaani:xz:1.12")
+    implementation("dev.rikka.rikkax.parcelablelist:parcelablelist:2.0.1")
+    implementation("com.google.accompanist:accompanist-drawablepainter:0.32.0")
+    implementation("commons-codec:commons-codec:1.19.0")
+    implementation("commons-io:commons-io:2.20.0")
+    implementation("org.apache.commons:commons-lang3:3.18.0")
 
     // 单元测试。org.json 需要真实实现（android.jar 里的是桩），
     // JUnit 跑协议严格性 / DER 向量 / 去重。
