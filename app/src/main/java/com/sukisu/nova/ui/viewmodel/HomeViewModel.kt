@@ -118,7 +118,10 @@ class HomeViewModel : ViewModel() {
                 .getBoolean("show_fingerprint", true),
             hideHomeWarnings = ksuApp.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
                 .getBoolean("hide_home_warnings", false),
-            isPreviewMode = !isManager && isRootAvailable,
+            // RootSentinel seam (v2.22.77): upstream's preview-mode
+            // warning banner ("no SukiSU kernel detected…") is
+            // meaningless for a detector app — never show it.
+            isPreviewMode = false,
             hideVersionMismatchWarning = false,
             isVersionSpoofSupported = false,
             isVersionSpoofed = false,

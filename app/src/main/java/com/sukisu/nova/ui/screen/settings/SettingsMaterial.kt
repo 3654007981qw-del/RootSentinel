@@ -24,6 +24,7 @@ import androidx.compose.material.icons.automirrored.filled.Rule
 import androidx.compose.material.icons.filled.Adb
 import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.DeveloperMode
@@ -554,13 +555,16 @@ fun SettingPagerMaterial(
                 modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 13.dp),
                 content = listOf(
                     {
+                        // RootSentinel seam (v2.22.77): upstream's
+                        // "send log" exports a ksud bugreport; RS
+                        // replaces it with its own report export.
                         SegmentedListItem(
-                            onClick = { showBottomSheet = true },
-                            headlineContent = { Text(customText(CustomTextKey.SETTING_SEND_LOG)) },
+                            onClick = { com.rootsentinel.data.ExportBridge.onExport?.invoke() },
+                            headlineContent = { Text("导出检测报告") },
                             leadingContent = {
                                 IconTile(
-                                    Icons.Filled.BugReport,
-                                    customText(CustomTextKey.SETTING_SEND_LOG)
+                                    Icons.Filled.Share,
+                                    "导出检测报告"
                                 )
                             },
                         )
@@ -584,12 +588,6 @@ fun SettingPagerMaterial(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            if (showBottomSheet) {
-                SendLogBottomSheet(
-                    onDismiss = { showBottomSheet = false },
-                    snackbarHostState = snackBarHost,
-                )
-            }
             // RootSentinel seam (v2.22.71): skin switch card.
             RsSkinCardMaterial()
             // RootSentinel seam (v2.22.76): RS privacy toggles.

@@ -425,31 +425,25 @@ private fun InactiveStatusCard(
                 .padding(22.dp),
             verticalArrangement = Arrangement.SpaceBetween,
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Icon(
-                    imageVector = if (notInstalled) Icons.Rounded.Warning else Icons.Rounded.Block,
-                    contentDescription = null,
-                    tint = accentColor,
-                    modifier = Modifier.size(18.dp),
-                )
-                Text(
-                    text = if (notInstalled) {
-                        customText(CustomTextKey.HOME_STATUS_INSTALL_HINT)
-                    } else {
-                        stringResource(R.string.sukisu_home_unsupported_reason)
-                    },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = accentColor,
-                )
-            }
+            // RootSentinel seam (v2.22.77): upstream's red
+            // "tap to install" hint row is gone; the card shows
+            // RS's own detection state instead of "not installed".
             Text(
-                text = stringResource(if (notInstalled) R.string.sukisu_home_not_installed else R.string.sukisu_home_unsupported),
+                text = if (notInstalled) {
+                    com.rootsentinel.data.ScanBridge.headline
+                } else {
+                    stringResource(R.string.sukisu_home_unsupported)
+                },
                 style = MaterialTheme.typography.displaySmall,
                 fontWeight = FontWeight.Black,
             )
+            if (notInstalled) {
+                Text(
+                    text = com.rootsentinel.data.ScanBridge.statusText,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             // RootSentinel seam (v2.22.76): upstream shows Install /
             // Jailbreak buttons here. RS has no kernel to install —
             // the buttons are removed, the status text stays.

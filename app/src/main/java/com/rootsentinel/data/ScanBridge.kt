@@ -15,5 +15,8 @@ import androidx.compose.runtime.setValue
 object ScanBridge {
     var scanning by mutableStateOf(false)
     var statusText by mutableStateOf("")
+    /** v2.22.77: big status word for the home status card
+     *  （待检测 / 检测中 / 最近一次评级词）. */
+    var headline by mutableStateOf("待检测")
     var onRequestScan: (() -> Unit)? = null
 }

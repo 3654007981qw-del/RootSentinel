@@ -481,7 +481,16 @@ fun RootApp(auto: String?, initialTab: Int, initialSub: String?) {
             result != null -> "${homeState.gradeWord} · ${homeState.gradeSummary}"
             else -> "对当前设备做一次完整的 Root / 隐藏痕迹检测"
         }
+        // v2.22.77: the SukiSU home status card shows RS's own
+        // detection state instead of upstream's "not installed".
+        com.rootsentinel.data.ScanBridge.headline = when {
+            scan.scanning -> "检测中"
+            result != null -> homeState.gradeWord
+            else -> "待检测"
+        }
         com.rootsentinel.data.ScanBridge.onRequestScan = { if (!scan.scanning) startScan() }
+        // v2.22.77: SukiSU settings' export row uses RS's exporter.
+        com.rootsentinel.data.ExportBridge.onExport = reportActions.onExport
     }
 
     val settingsActions = SettingsScreenActions(

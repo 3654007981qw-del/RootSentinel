@@ -24,6 +24,7 @@ import androidx.compose.material.icons.automirrored.rounded.Rule
 import androidx.compose.material.icons.rounded.Adb
 import androidx.compose.material.icons.rounded.AdminPanelSettings
 import androidx.compose.material.icons.rounded.BugReport
+import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.DeveloperMode
@@ -714,22 +715,20 @@ fun SettingPagerMiuix(
                             .fillMaxWidth(),
                         colors = backgroundAwareCardColors(),
                     ) {
+                        // RootSentinel seam (v2.22.77): upstream's
+                        // "send log" exports a ksud bugreport; RS
+                        // replaces it with its own report export.
                         ArrowPreference(
-                            title = customText(CustomTextKey.SETTING_SEND_LOG),
+                            title = "导出检测报告",
                             startAction = {
                                 Icon(
-                                    Icons.Rounded.BugReport,
+                                    Icons.Rounded.Share,
                                     modifier = Modifier.padding(end = 6.dp),
-                                    contentDescription = customText(CustomTextKey.SETTING_SEND_LOG),
+                                    contentDescription = "导出检测报告",
                                     tint = colorScheme.onBackground
                                 )
                             },
-                            onClick = { showSendLogDialog.value = true },
-                        )
-                        SendLogDialog(
-                            show = showSendLogDialog.value,
-                            onDismissRequest = { showSendLogDialog.value = false },
-                            loadingDialog = loadingDialog
+                            onClick = { com.rootsentinel.data.ExportBridge.onExport?.invoke() },
                         )
                         val about = customText(CustomTextKey.PAGE_ABOUT)
                         ArrowPreference(

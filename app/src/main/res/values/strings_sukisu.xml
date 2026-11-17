@@ -1757,5 +1757,5 @@
     <string name="sukisu_builtin_zygisk_opt_custom_linker_summary">Load modules with the built-in ELF loader so they never enter the system linker\'s solist. Falls back to the system linker if a module cannot be loaded.</string>
     <string name="sukisu_builtin_zygisk_opt_lsplt">Use LSPLT for PLT hooks</string>
     <string name="sukisu_builtin_zygisk_opt_lsplt_summary">Off uses ByteHook, on uses LSPLT.</string>
-    <string name="sukisu_app_name">SukiSU Nova</string>
+    <string name="sukisu_app_name">RootSentinel</string>
 </resources>

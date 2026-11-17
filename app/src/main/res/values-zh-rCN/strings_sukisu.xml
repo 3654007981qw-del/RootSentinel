@@ -1747,5 +1747,5 @@
     <string name="sukisu_builtin_zygisk_opt_custom_linker_summary">使用内置 ELF 加载器加载模块，使其不进入系统链接器的 solist。模块无法这样加载时会回退到系统链接器。</string>
     <string name="sukisu_builtin_zygisk_opt_lsplt">使用 LSPLT 进行 PLT Hook</string>
     <string name="sukisu_builtin_zygisk_opt_lsplt_summary">关闭时使用 ByteHook，开启时使用 LSPLT。</string>
-    <string name="sukisu_app_name">SukiSU Nova</string>
+    <string name="sukisu_app_name">RootSentinel</string>
 </resources>
