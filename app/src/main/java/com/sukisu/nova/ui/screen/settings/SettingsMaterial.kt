@@ -592,6 +592,8 @@ fun SettingPagerMaterial(
             }
             // RootSentinel seam (v2.22.71): skin switch card.
             RsSkinCardMaterial()
+            // RootSentinel seam (v2.22.76): RS privacy toggles.
+            RsPrivacyCardMaterial()
             Spacer(modifier = Modifier.height(bottomInnerPadding))
         }
     }

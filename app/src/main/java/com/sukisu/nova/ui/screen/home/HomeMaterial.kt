@@ -125,6 +125,9 @@ fun HomePagerMaterial(
                 state = state,
                 actions = actions,
             )
+            // RootSentinel seam (v2.22.76): scan entry card —
+            // upstream's home has no scan concept.
+            RsScanCardMaterial()
             if (state.showVersionMismatchWarning) {
                 WarningCard(
                     customText(CustomTextKey.HOME_WARN_VERSION_SPOOF),
@@ -274,11 +277,10 @@ private fun StatusCard(
     actions: HomeActions,
 ) {
     val ksuActive = state.ksuVersion != null
-    val onClick = {
-        if (!state.isLateLoadMode) {
-            actions.onInstallClick()
-        }
-    }
+    // RootSentinel seam (v2.22.76): upstream makes the whole status
+    // card open the kernel install flow. RS ships no kernel daemon,
+    // so the card is display-only here.
+    val onClick: () -> Unit = {}
     if (ksuActive && state.homeLayout == HomeLayout.IMMERSIVE) {
         ImmersiveStatusCardMaterial(state = state, onClick = onClick)
     } else if (ksuActive) {
@@ -448,18 +450,9 @@ private fun InactiveStatusCard(
                 style = MaterialTheme.typography.displaySmall,
                 fontWeight = FontWeight.Black,
             )
-            if (notInstalled) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = actions.onInstallClick) {
-                        Text(customText(CustomTextKey.HOME_BTN_INSTALL))
-                    }
-                    if (state.isSELinuxPermissive) {
-                        OutlinedButton(onClick = actions.onJailbreakClick) {
-                            Text(stringResource(R.string.sukisu_home_jailbreak))
-                        }
-                    }
-                }
-            }
+            // RootSentinel seam (v2.22.76): upstream shows Install /
+            // Jailbreak buttons here. RS has no kernel to install —
+            // the buttons are removed, the status text stays.
         }
     }
 }

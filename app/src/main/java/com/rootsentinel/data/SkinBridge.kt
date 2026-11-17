@@ -15,6 +15,15 @@ object SkinBridge {
     var uiSkin by mutableStateOf("ksu")
 
     /**
+     * v2.22.76: the SukiSU shell's own ui mode ("miuix"/"material"),
+     * synced by SukisuShell on every recomposition. RootApp's
+     * sub-pages and dialogs (which render above the shell) follow
+     * this while the SukiSU skin is active, instead of the KSU
+     * shell's mode.
+     */
+    var sukisuUiMode by mutableStateOf("miuix")
+
+    /**
      * v2.22.73 one-launch rescue: when the previous launch crashed
      * (a pending crash file exists) and the persisted skin is the
      * SukiSU shell, RootApp renders the KernelSU shell for THIS launch

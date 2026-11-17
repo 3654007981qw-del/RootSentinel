@@ -38,6 +38,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -194,6 +195,23 @@ fun RootApp(auto: String?, initialTab: Int, initialSub: String?) {
     LaunchedEffect(com.rootsentinel.data.SkinBridge.uiSkin) {
         if (settings.uiSkin != com.rootsentinel.data.SkinBridge.uiSkin) {
             settings.uiSkin = com.rootsentinel.data.SkinBridge.uiSkin
+        }
+    }
+    // v2.22.76: same two-way sync for the RS privacy toggles the
+    // SukiSU settings' RS privacy card writes to.
+    LaunchedEffect(settings.telemetryEnabled, settings.crashUploadEnabled) {
+        com.rootsentinel.data.PrivacyBridge.telemetryEnabled = settings.telemetryEnabled
+        com.rootsentinel.data.PrivacyBridge.crashUploadEnabled = settings.crashUploadEnabled
+    }
+    LaunchedEffect(
+        com.rootsentinel.data.PrivacyBridge.telemetryEnabled,
+        com.rootsentinel.data.PrivacyBridge.crashUploadEnabled,
+    ) {
+        if (settings.telemetryEnabled != com.rootsentinel.data.PrivacyBridge.telemetryEnabled) {
+            settings.telemetryEnabled = com.rootsentinel.data.PrivacyBridge.telemetryEnabled
+        }
+        if (settings.crashUploadEnabled != com.rootsentinel.data.PrivacyBridge.crashUploadEnabled) {
+            settings.crashUploadEnabled = com.rootsentinel.data.PrivacyBridge.crashUploadEnabled
         }
     }
     val history = remember { HistoryStore(ctx) }
@@ -455,6 +473,17 @@ fun RootApp(auto: String?, initialTab: Int, initialSub: String?) {
         onOpenItem = { e -> detail = e; subPage = SubPage.DETAIL },
     )
 
+    // v2.22.76: feed the SukiSU home page's RS scan card (ScanBridge).
+    SideEffect {
+        com.rootsentinel.data.ScanBridge.scanning = scan.scanning
+        com.rootsentinel.data.ScanBridge.statusText = when {
+            scan.scanning -> "正在扫描：${scan.moduleName}（已检 ${scan.total} 项）"
+            result != null -> "${homeState.gradeWord} · ${homeState.gradeSummary}"
+            else -> "对当前设备做一次完整的 Root / 隐藏痕迹检测"
+        }
+        com.rootsentinel.data.ScanBridge.onRequestScan = { if (!scan.scanning) startScan() }
+    }
+
     val settingsActions = SettingsScreenActions(
         onSetCheckUpdate = { settings.checkUpdate = it },
         onSetCheckModuleUpdate = { settings.checkModuleUpdate = it },
@@ -623,30 +652,44 @@ fun RootApp(auto: String?, initialTab: Int, initialSub: String?) {
                             },
                         ),
                     ) {
+                        // v2.22.76: sub-pages follow the active shell's
+                        // own ui mode (SukiSU's, while that skin is on).
+                        val subUiMode = if (
+                            settings.uiSkin == "sukisu" &&
+                            !com.rootsentinel.data.SkinBridge.forceKsuOnce
+                        ) {
+                            if (com.rootsentinel.data.SkinBridge.sukisuUiMode == "material") {
+                                UiMode.Material
+                            } else {
+                                UiMode.Miuix
+                            }
+                        } else {
+                            uiMode
+                        }
                         when (subPage) {
-                            SubPage.SCAN -> if (uiMode == UiMode.Miuix) {
+                            SubPage.SCAN -> if (subUiMode == UiMode.Miuix) {
                                 ScanScreenMiuix(scan) { scan.cancelRequested = true }
                             } else {
                                 ScanScreenMaterial(scan) { scan.cancelRequested = true }
                             }
                             SubPage.DETAIL -> detail?.let { e ->
-                                if (uiMode == UiMode.Miuix) {
+                                if (subUiMode == UiMode.Miuix) {
                                     DetailScreenMiuix(e) { subPage = SubPage.NONE }
                                 } else {
                                     DetailScreenMaterial(e) { subPage = SubPage.NONE }
                                 }
                             }
-                            SubPage.DEVICE -> if (uiMode == UiMode.Miuix) {
+                            SubPage.DEVICE -> if (subUiMode == UiMode.Miuix) {
                                 DeviceScreenMiuix { subPage = SubPage.NONE }
                             } else {
                                 DeviceScreenMaterial { subPage = SubPage.NONE }
                             }
-                            SubPage.ABOUT -> if (uiMode == UiMode.Miuix) {
+                            SubPage.ABOUT -> if (subUiMode == UiMode.Miuix) {
                                 AboutScreenMiuix({ subPage = SubPage.NONE }, ::openUrl)
                             } else {
                                 AboutScreenMaterial({ subPage = SubPage.NONE }, ::openUrl)
                             }
-                            SubPage.THEME -> if (uiMode == UiMode.Miuix) {
+                            SubPage.THEME -> if (subUiMode == UiMode.Miuix) {
                                 ColorPaletteScreenMiuix(paletteState, paletteActions)
                             } else {
                                 ColorPaletteScreenMaterial(paletteState, paletteActions)

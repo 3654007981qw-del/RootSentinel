@@ -61,9 +61,24 @@ private val DECLARATION_PARAGRAPHS = listOf(
 
 // ---------------------------------------------------------------- 声明弹窗
 
+/**
+ * v2.22.76: dialogs render above whichever shell is active; while
+ * the SukiSU skin is on they follow SukiSU's own ui mode (bridged
+ * by SukisuShell), otherwise the KSU shell's LocalUiMode.
+ */
+@Composable
+private fun rsDialogMiuix(): Boolean {
+    val bridge = com.rootsentinel.data.SkinBridge
+    return if (bridge.uiSkin == "sukisu" && !bridge.forceKsuOnce) {
+        bridge.sukisuUiMode != "material"
+    } else {
+        LocalUiMode.current == UiMode.Miuix
+    }
+}
+
 @Composable
 fun DeclarationDialog(onConfirm: () -> Unit) {
-    if (LocalUiMode.current == UiMode.Miuix) {
+    if (rsDialogMiuix()) {
         val show = remember { mutableStateOf(true) }
         WindowDialog(
             show = show.value,
@@ -114,7 +129,7 @@ fun DeclarationDialog(onConfirm: () -> Unit) {
 
 @Composable
 fun UpdateDialog(controller: UpdateController, onDismiss: () -> Unit) {
-    if (LocalUiMode.current == UiMode.Miuix) {
+    if (rsDialogMiuix()) {
         UpdateDialogMiuix(controller, onDismiss)
     } else {
         UpdateDialogMaterial(controller, onDismiss)

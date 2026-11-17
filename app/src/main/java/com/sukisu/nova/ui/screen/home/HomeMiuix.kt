@@ -145,6 +145,9 @@ fun HomePagerMiuix(
                             state = state,
                             actions = actions,
                         )
+                        // RootSentinel seam (v2.22.76): scan entry card —
+                        // upstream's home has no scan concept.
+                        RsScanCardMiuix()
                 if (state.showVersionMismatchWarning) {
                     WarningCard(
                         customText(CustomTextKey.HOME_WARN_VERSION_SPOOF),
@@ -301,11 +304,10 @@ private fun StatusCard(
     state: HomeUiState,
     actions: HomeActions,
 ) {
-    val onClick = {
-        if (!state.isLateLoadMode) {
-            actions.onInstallClick()
-        }
-    }
+    // RootSentinel seam (v2.22.76): upstream makes the whole status
+    // card open the kernel install flow. RS ships no kernel daemon,
+    // so the card is display-only here.
+    val onClick: () -> Unit = {}
     when {
         state.ksuVersion != null && state.homeLayout == HomeLayout.IMMERSIVE -> ImmersiveStatusCardMiuix(
             state = state,
@@ -505,21 +507,9 @@ private fun InactiveStatusCard(
                 fontSize = 36.sp,
                 fontWeight = FontWeight.Bold,
             )
-            if (notInstalled) {
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    TextButton(
-                        text = customText(CustomTextKey.HOME_BTN_INSTALL),
-                        onClick = actions.onInstallClick,
-                        colors = ButtonDefaults.textButtonColorsPrimary()
-                    )
-                    if (state.isSELinuxPermissive) {
-                        TextButton(
-                            text = stringResource(R.string.sukisu_home_jailbreak),
-                            onClick = actions.onJailbreakClick,
-                        )
-                    }
-                }
-            }
+            // RootSentinel seam (v2.22.76): upstream shows Install /
+            // Jailbreak buttons here. RS has no kernel to install —
+            // the buttons are removed, the status text stays.
         }
     }
 }

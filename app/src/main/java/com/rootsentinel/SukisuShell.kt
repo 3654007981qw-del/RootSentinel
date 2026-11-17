@@ -24,6 +24,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -140,6 +141,13 @@ fun SukisuShell(
     val selectedMainPage by mainViewModel.selectedMainPage.collectAsStateWithLifecycle()
     val appSettings = uiState.appSettings
     val uiMode = uiState.uiMode
+    // RootSentinel seam (v2.22.76): publish this shell's ui mode so
+    // RootApp's sub-pages and dialogs (rendered above the shell)
+    // can follow it instead of the KSU shell's mode.
+    SideEffect {
+        com.rootsentinel.data.SkinBridge.sukisuUiMode =
+            if (uiMode == com.sukisu.nova.ui.UiMode.Material) "material" else "miuix"
+    }
     val navigator = rememberNavigator(Route.Main)
 
     // RootApp already scaled LocalDensity by RS's pageScale; undo that and
