@@ -491,6 +491,8 @@ fun RootApp(auto: String?, initialTab: Int, initialSub: String?) {
         com.rootsentinel.data.ScanBridge.onRequestScan = { if (!scan.scanning) startScan() }
         // v2.22.77: SukiSU settings' export row uses RS's exporter.
         com.rootsentinel.data.ExportBridge.onExport = reportActions.onExport
+        // v2.22.79: SukiSU About page's manual update check.
+        com.rootsentinel.data.UpdateBridge.onCheckManual = { updateController.checkManual(scope) }
     }
 
     val settingsActions = SettingsScreenActions(

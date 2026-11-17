@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.22.79 — 2026-11-17
+
+**SukiSU（Ultra）外壳补上手动「检查更新」入口。** 此前 Ultra 外壳只有启动时自动检查（关于页的开关），没有手动检查：上游的手动入口是主页的更新卡片，那张卡在 RootSentinel 里不显示（它查的是 SukiSU 的版本）。现在关于页在「检查更新」开关下方多了一行手动检查，点按立即检查新版——有新版弹更新窗、已是最新或失败都给明确反馈，与 KernelSU 外壳设置里的手动检查走同一套更新器（GitHub 发行版、下载后三重校验不变）。
+
+
 ## 2.22.78 — 2026-11-17
 
 **SukiSU 外壳主页底部卡换成 RootSentinel 自己的。** 「支持开发」不再指向 SukiSU 的捐赠页（Material 模式下甚至指向 KernelSU 作者的 Patreon），文案改为 RootSentinel 免费开源、去 GitHub 点 Star 或反馈问题，点击打开 RootSentinel 的 GitHub 仓库；「了解 SukiSU」改为「了解 RootSentinel」，同样指向项目主页（使用说明、更新日志、检测原理）。KernelSU 外壳主页没有这张卡，不受影响。

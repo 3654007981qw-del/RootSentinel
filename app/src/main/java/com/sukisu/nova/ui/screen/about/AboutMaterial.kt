@@ -23,6 +23,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Science
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.SystemUpdateAlt
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material3.Icon
 import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -148,6 +150,26 @@ fun AboutScreenMaterial(
                         )
                     }
                 }
+            }
+            item {
+                // RootSentinel seam (v2.22.79): manual update check.
+                // Upstream's manual entry is its home update card,
+                // which never renders in RS; without this row the
+                // SukiSU shell could only auto-check at launch.
+                SegmentedColumn(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    content = listOf(
+                        {
+                            SegmentedListItem(
+                                onClick = { com.rootsentinel.data.UpdateBridge.onCheckManual?.invoke() },
+                                headlineContent = { Text("检查更新") },
+                                supportingContent = { Text("当前版本 ${state.versionName}，点按立即检查新版") },
+                                leadingContent = { Icon(Icons.Filled.SystemUpdateAlt, null) },
+                                trailingContent = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null) },
+                            )
+                        }
+                    )
+                )
             }
             item {
                 SegmentedColumn(
