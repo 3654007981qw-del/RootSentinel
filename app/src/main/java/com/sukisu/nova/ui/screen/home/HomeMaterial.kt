@@ -589,27 +589,30 @@ private fun SupportLinks(
     onOpenUrl: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val learnMoreUrl = stringResource(R.string.sukisu_home_learn_kernelsu_url)
+    // RootSentinel seam (v2.22.78): upstream's rows pointed at
+    // KernelSU's Patreon and SukiSU's docs. RS's own: both go
+    // to the RootSentinel GitHub repo.
+    val repoUrl = "https://github.com/AURORA-0711/RootSentinel"
 
     SegmentedColumn(modifier = modifier.fillMaxWidth()) {
         item {
             SegmentedListItem(
-                onClick = { onOpenUrl("https://patreon.com/weishu") },
-                headlineContent = { Text(stringResource(R.string.sukisu_home_support_title)) },
-                supportingContent = { Text(stringResource(R.string.sukisu_home_support_content)) },
+                onClick = { onOpenUrl(repoUrl) },
+                headlineContent = { Text("支持开发") },
+                supportingContent = { Text("RootSentinel 保持免费开源，去 GitHub 点个 Star 或反馈问题就是支持") },
                 leadingContent = {
-                    IconTile(Icons.Filled.VolunteerActivism, stringResource(R.string.sukisu_home_support_title))
+                    IconTile(Icons.Filled.VolunteerActivism, "支持开发")
                 },
                 trailingContent = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null) },
             )
         }
         item {
             SegmentedListItem(
-                onClick = { onOpenUrl(learnMoreUrl) },
-                headlineContent = { Text(stringResource(R.string.sukisu_home_learn_kernelsu)) },
-                supportingContent = { Text(stringResource(R.string.sukisu_home_click_to_learn_kernelsu)) },
+                onClick = { onOpenUrl(repoUrl) },
+                headlineContent = { Text("了解 RootSentinel") },
+                supportingContent = { Text("使用说明、更新日志与检测原理都在项目主页") },
                 leadingContent = {
-                    IconTile(Icons.AutoMirrored.Filled.MenuBook, stringResource(R.string.sukisu_home_learn_kernelsu))
+                    IconTile(Icons.AutoMirrored.Filled.MenuBook, "了解 RootSentinel")
                 },
                 trailingContent = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null) },
             )

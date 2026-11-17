@@ -36,17 +36,18 @@ fun AboutScreen() {
     val uriHandler = LocalUriHandler.current
     val viewModel = viewModel<SettingsViewModel>()
     val settingsState by viewModel.uiState.collectAsStateWithLifecycle()
-    val htmlString = stringResource(
-        id = R.string.sukisu_about_source_code,
-        "<b><a href=\"https://github.com/ShirkNeko/SukiSU-Nova\">GitHub</a></b>",
-        "<b><a href=\"https://t.me/SukiKSU\">Telegram</a></b>",
-    )
+    // RootSentinel seam (v2.22.78): upstream's About links pointed
+    // at SukiSU-Nova's GitHub and Telegram. RS's own links:
+    // its GitHub repo and its Gitee mirror.
     val state = AboutUiState(
         title = customText(CustomTextKey.PAGE_ABOUT),
         appName = stringResource(R.string.sukisu_app_name),
         versionName = BuildConfig.VERSION_NAME,
         icon = BuiltinAppIcons.find(settingsState.appIconId),
-        links = extractLinks(htmlString),
+        links = listOf(
+            LinkInfo("在 GitHub 查看源码", "https://github.com/AURORA-0711/RootSentinel"),
+            LinkInfo("在 Gitee 查看镜像", "https://gitee.com/AURORAqw/RootSentinel"),
+        ),
         checkUpdate = settingsState.checkUpdate,
         checkCiUpdate = settingsState.checkCiUpdate,
         checkModuleUpdate = settingsState.checkModuleUpdate,

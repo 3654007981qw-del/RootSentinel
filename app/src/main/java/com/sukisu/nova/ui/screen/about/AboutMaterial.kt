@@ -57,7 +57,6 @@ fun AboutScreenMaterial(
     actions: AboutScreenActions,
 ) {
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(rememberTopAppBarState())
-    val contributors = rememberContributors()
     val isKsuValid = remember { Natives.isManager }
 
     ExpressiveScaffold(
@@ -135,15 +134,10 @@ fun AboutScreenMaterial(
                             onCheckedChange = actions.onSetCheckUpdate,
                         )
                     }
-                    item(visible = state.checkUpdate) {
-                        SegmentedSwitchItem(
-                            icon = Icons.Filled.Science,
-                            title = stringResource(id = R.string.sukisu_settings_check_ci_update),
-                            summary = stringResource(id = R.string.sukisu_settings_check_ci_update_summary),
-                            checked = state.checkCiUpdate,
-                            onCheckedChange = actions.onSetCheckCiUpdate,
-                        )
-                    }
+                    // RootSentinel seam (v2.22.78): upstream's
+                    // "check CI builds" switch removed — RS has
+                    // no CI-build update channel; its checker
+                    // follows GitHub releases only.
                     item(visible = isKsuValid) {
                         SegmentedSwitchItem(
                             icon = Icons.Filled.SystemUpdateAlt,
@@ -168,54 +162,27 @@ fun AboutScreenMaterial(
                     }
                 )
             }
-            if (contributors.isNotEmpty()) {
-                item {
-                    Row(
-                        modifier = Modifier.padding(start = 28.dp, end = 28.dp, top = 16.dp, bottom = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+            // RootSentinel seam (v2.22.78): upstream's contributor
+            // wall + name wordmark (SukiSU's 22 contributors)
+            // replaced with RS's own credits card.
+            item {
+                TonalCard(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    shape = MaterialTheme.shapes.extraLarge,
+                ) {
+                    Column(
+                        modifier = Modifier.padding(18.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         Text(
-                            text = stringResource(R.string.sukisu_about_contributors),
+                            text = "开发与维护",
                             style = MaterialTheme.typography.titleSmall,
                             color = MaterialTheme.colorScheme.primary,
                         )
                         Text(
-                            text = contributors.size.toString(),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer,
-                            modifier = Modifier
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.secondaryContainer)
-                                .padding(horizontal = 8.dp, vertical = 2.dp),
-                        )
-                    }
-                    TonalCard(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                        shape = MaterialTheme.shapes.extraLarge,
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(18.dp),
-                            verticalArrangement = Arrangement.spacedBy(14.dp),
-                        ) {
-                            ContributorWall(
-                                contributors = contributors,
-                                onSelect = { actions.onOpenLink(it.profileUrl) },
-                            )
-                            Text(
-                                text = stringResource(R.string.sukisu_about_contributors_hint),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                    TonalCard(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                        shape = MaterialTheme.shapes.extraLarge,
-                    ) {
-                        ContributorNameWordmark(
-                            names = contributors.map { it.login },
-                            modifier = Modifier.padding(18.dp),
+                            text = "RootSentinel 由 AURORA 开发与维护，检测引擎与数据均属本项目。界面移植自 KernelSU 与 SukiSU-Nova，在此致谢。",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }

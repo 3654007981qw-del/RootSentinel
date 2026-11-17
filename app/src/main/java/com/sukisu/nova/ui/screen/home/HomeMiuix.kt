@@ -566,37 +566,40 @@ private fun SupportLinks(
     onOpenUrl: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val learnMoreUrl = stringResource(R.string.sukisu_home_learn_kernelsu_url)
+    // RootSentinel seam (v2.22.78): upstream's rows pointed at
+    // SukiSU's donation page and docs. RS's own: both go to the
+    // RootSentinel GitHub repo.
+    val repoUrl = "https://github.com/AURORA-0711/RootSentinel"
 
     AppCard(
         modifier = modifier,
         colors = backgroundAwareCardColors(),
     ) {
         ArrowPreference(
-            title = stringResource(R.string.sukisu_home_support_title),
-            summary = stringResource(R.string.sukisu_home_support_content),
+            title = "支持开发",
+            summary = "RootSentinel 保持免费开源，去 GitHub 点个 Star 或反馈问题就是支持",
             startAction = {
                 Icon(
                     imageVector = Icons.Filled.VolunteerActivism,
-                    contentDescription = stringResource(R.string.sukisu_home_support_title),
+                    contentDescription = "支持开发",
                     modifier = Modifier.padding(end = 6.dp),
                     tint = colorScheme.onBackground,
                 )
             },
-            onClick = { onOpenUrl("https://opencollective.com/SukiSU-Nova") },
+            onClick = { onOpenUrl(repoUrl) },
         )
         ArrowPreference(
-            title = stringResource(R.string.sukisu_home_learn_kernelsu),
-            summary = stringResource(R.string.sukisu_home_click_to_learn_kernelsu),
+            title = "了解 RootSentinel",
+            summary = "使用说明、更新日志与检测原理都在项目主页",
             startAction = {
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.MenuBook,
-                    contentDescription = stringResource(R.string.sukisu_home_learn_kernelsu),
+                    contentDescription = "了解 RootSentinel",
                     modifier = Modifier.padding(end = 6.dp),
                     tint = colorScheme.onBackground,
                 )
             },
-            onClick = { onOpenUrl(learnMoreUrl) },
+            onClick = { onOpenUrl(repoUrl) },
         )
     }
 }

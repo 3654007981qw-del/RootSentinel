@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.22.78 — 2026-11-17
+
+**SukiSU 外壳主页底部卡换成 RootSentinel 自己的。** 「支持开发」不再指向 SukiSU 的捐赠页（Material 模式下甚至指向 KernelSU 作者的 Patreon），文案改为 RootSentinel 免费开源、去 GitHub 点 Star 或反馈问题，点击打开 RootSentinel 的 GitHub 仓库；「了解 SukiSU」改为「了解 RootSentinel」，同样指向项目主页（使用说明、更新日志、检测原理）。KernelSU 外壳主页没有这张卡，不受影响。
+
+**关于页也换成 RootSentinel 自己的。** 「检查 CI 版本更新」开关删除（RS 没有 CI 构建更新通道，检查更新只跟 GitHub 发行版）；链接改为「在 GitHub 查看源码」（RootSentinel 仓库）与「在 Gitee 查看镜像」，不再指向 SukiSU 的仓库与 Telegram 频道；「主要贡献者」头像墙与 SUKISU 名字字标删除，换成 RS 的「开发与维护」致谢卡（界面移植自 KernelSU 与 SukiSU-Nova，致谢保留）。「检查更新」开关保留——它真实门控着 RS 自己的启动时更新检查。
+
+
 ## 2.22.77 — 2026-11-17
 
 **SukiSU 外壳再清三处上游残留（真机截图反馈）。** ① 名字：外壳里的应用名由「SukiSU Nova」改为「RootSentinel」（主页标题、关于页、启动屏等所有引用该名称处一致）。② 主页状态卡：去掉红色的「点击安装」提示行，大字不再显示「未安装」，改为 RootSentinel 自己的检测状态——未扫时显示「待检测」，扫描中显示「检测中」，扫完显示评级词，下方小字是进度或结论摘要。③ 主页橙色横幅（「未检测到 SukiSU 内核…预览模式」）已移除。④ 设置里的「发送日志」换成「导出检测报告」：不再导出上游的内核日志包，改为导出 RootSentinel 最近一次的检测报告 JSON（与报表页的导出是同一动作）。KernelSU 外壳与检测引擎无变化。
