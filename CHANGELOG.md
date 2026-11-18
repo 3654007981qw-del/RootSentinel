@@ -3,6 +3,14 @@
 更新说明从 2.22.82 起中英双语；2.22.81 及更早的条目已一并改写。
 Release notes are bilingual (Chinese / English) from 2.22.82 on; older entries have been rewritten to match.
 
+## 2.22.85 — 2026-11-18
+
+**外壳切换补上交叉淡化，这次真无缝了。**
+**The shell switch crossfades now — properly seamless this time.**
+
+- .84 把两套外壳改成常驻、切换即时显隐，状态和页签都不丢了，但即时显隐在观感上仍然是「硬切」——上一帧是这套、下一帧就是另一套，眼睛跟不上。这版在常驻的基础上补了交叉淡化：切换时旧外壳 240ms 淡出、新外壳同时淡入，两套界面在过渡里叠化衔接，没有任何一帧是突变。淡化只走绘制层，不触发两套界面的重组，常驻保留的滚动位置、页面状态和页签同步都和 .84 一样。原定于本版的 .83 审计修复（崩溃堆栈脱敏、服务端字段白名单等）顺延到 2.22.86。
+  .84 made both shells stay composed with an instant reveal — state and tab position stopped being lost, but an instant reveal still reads as a hard cut: one frame is this shell, the next frame is the other. This release adds a crossfade on top of the always-composed stack: over 240 ms the outgoing shell fades out while the incoming one fades in, the two UIs blending through the transition with no single mutated frame. The fade runs in the draw layer only, so neither shell recomposes, and .84's preserved scroll positions, page state, and shared tab position all behave as before. The .83 audit fixes planned for this release (crash-stack sanitization, server field whitelist, and friends) move to 2.22.86.
+
 ## 2.22.84 — 2026-11-18
 
 **外壳切换改成无缝了。**
