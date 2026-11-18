@@ -147,6 +147,25 @@ class ScoringModelTest {
     }
 
     @Test
+    fun shadowScoreDiscountsSelinuxfsGroupOnly() {
+        // v2.22.83：selinuxfs 组内两条 HIGH HIT 折减（20 + 20×0.25 = 25/40）；
+        // 跨组（selinuxfs vs fs:/data/adb）的 HIT 不互相折减，影子 == 正式。
+        val sameGroup = listOf(
+            gev("F.SELINUX_POLICY", "selinuxfs"),
+            gev("F.SELINUX_FILTERED", "selinuxfs"),
+        )
+        val r1 = ScoringModel.score(sameGroup, emptyList(), DeviceProfile())
+        assertEquals(25.0 / 40.0, r1.shadowScore / r1.score, 0.01)
+
+        val crossGroup = listOf(
+            gev("F.SELINUX_POLICY", "selinuxfs"),
+            gev("A.DATA_ADB", "fs:/data/adb"),
+        )
+        val r2 = ScoringModel.score(crossGroup, emptyList(), DeviceProfile())
+        assertEquals(r2.score, r2.shadowScore, 0.001)
+    }
+
+    @Test
     fun shadowScoreIgnoresGroupedPasses() {
         // 只有 HIT 进影子桶：同组一条 HIT + 一条 PASS，
         // 影子分应与正式分一致（PASS 本来就不计分）。

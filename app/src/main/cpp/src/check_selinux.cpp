@@ -115,9 +115,14 @@ void checkSelinux(ScanReport& r) {
             enforceViaCanary = true;
         }
     }
+    // v2.22.83（E1 扩展）：ENFORCE / POLICY / FILTERED 三项的证据都读自
+    // selinuxfs 这棵树，同一伪造源（如 KSU selinux_hide 的 fake_status）
+    // 可以同时喂饱三路 —— 影子评分里同组折算，不算三份独立证据。
+    // sourceGroup = "selinuxfs"，官方评分口径不变。
     if (enforce == "1") {
         Evidence e = makePass(RSs("F.SELINUX_ENFORCE"), Category::SELINUX,
                               RSs("SELinux = Enforcing"));
+        e.sourceGroup = RSs("selinuxfs");
         e.addVector(RSs("enforce"), enforce);
         if (enforceViaStatus) e.addVector(RSs("via"), RSs("/sys/fs/selinux/status"));
         if (enforceViaCanary) {
@@ -131,6 +136,7 @@ void checkSelinux(ScanReport& r) {
         Evidence e = makeHit(RSs("F.SELINUX_ENFORCE"), Category::SELINUX,
                              Severity::CRITICAL, Confidence::HIGH,
                              RSs("SELinux 处于 Permissive 模式"));
+        e.sourceGroup = RSs("selinuxfs");
         e.addVector(RSs("enforce"), enforce);
         if (enforceViaStatus) e.addVector(RSs("via"), RSs("/sys/fs/selinux/status"));
         r.add(std::move(e));
@@ -138,7 +144,8 @@ void checkSelinux(ScanReport& r) {
         // 两个通道都读不到：原厂 App 也可能读不到（部分机型 selinuxfs 受限）
         r.add(makeUnknown(RSs("F.SELINUX_ENFORCE"), Category::SELINUX,
                           Severity::LOW,
-                          RSs("enforce 与 status 均不可读（原厂部分机型同样如此）")));
+                          RSs("enforce 与 status 均不可读（原厂部分机型同样如此）"))
+                  .withSourceGroup(RSs("selinuxfs")));
     }
 
     // ---------------------------------------------------------- getenforce 语义
@@ -149,6 +156,7 @@ void checkSelinux(ScanReport& r) {
         Evidence e = makeHit(RSs("F.SELINUX_FILTERED"), Category::SELINUX,
                              Severity::MEDIUM, Confidence::MEDIUM,
                              RSs("selinuxfs 部分节点不可读 ← 策略被改过"));
+        e.sourceGroup = RSs("selinuxfs");
         e.addVector(RSs("enforce"), enforceFile);
         e.addVector(RSs("policyvers"), RSs("N/A"));
         r.add(std::move(e));
@@ -160,6 +168,7 @@ void checkSelinux(ScanReport& r) {
         Evidence e = makeHit(RSs("F.SELINUX_POLICY"), Category::SELINUX,
                              Severity::HIGH, Confidence::HIGH,
                              RSs("SELinux policy 可读 ← 检测器能反编译策略"));
+        e.sourceGroup = RSs("selinuxfs");
         e.addVector(RSs("size"), std::to_string(policy.size()));
         r.add(std::move(e));
     } else {
@@ -173,11 +182,13 @@ void checkSelinux(ScanReport& r) {
         // F.SELINUX_ENFORCE 单独记录，这里不会掩盖 Permissive 命中。
         if (enforce == "1") {
             r.add(makePass(RSs("F.SELINUX_POLICY"), Category::SELINUX,
-                           RSs("SELinux policy 不可读（Enforcing 已确认，符合加固预期）")));
+                           RSs("SELinux policy 不可读（Enforcing 已确认，符合加固预期）"))
+                      .withSourceGroup(RSs("selinuxfs")));
         } else {
             r.add(makeUnknown(RSs("F.SELINUX_POLICY"), Category::SELINUX,
                               Severity::LOW,
-                              RSs("SELinux policy 不可读且 enforce 状态未确认，无法判定")));
+                              RSs("SELinux policy 不可读且 enforce 状态未确认，无法判定"))
+                      .withSourceGroup(RSs("selinuxfs")));
         }
     }
 
