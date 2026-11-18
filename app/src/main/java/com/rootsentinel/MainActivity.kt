@@ -11,7 +11,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
-import androidx.compose.animation.togetherWith
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Box
@@ -20,6 +19,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.systemBars
@@ -40,11 +40,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.invisibleToUser
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
@@ -242,6 +246,24 @@ fun RootApp(auto: String?, initialTab: Int, initialSub: String?) {
         pagerState = pagerState,
         animatePageChanges = !useRail,
     )
+
+    // v2.22.84: shared tab position for the seamless shell switch. Both
+    // shells stay composed (see the shell stack in the content below);
+    // whichever shell is active drives this value, and the hidden
+    // shell's pager follows instantly, so switching shells lands on
+    // the same tab the user was on. Both shells use the same tab
+    // order (Home / Report / History / Settings).
+    var sharedPage by rememberSaveable {
+        mutableIntStateOf(initialTab.coerceIn(0, 3))
+    }
+    LaunchedEffect(pagerState.settledPage) {
+        sharedPage = pagerState.settledPage
+    }
+    LaunchedEffect(sharedPage) {
+        if (pagerState.settledPage != sharedPage && !pagerState.isScrollInProgress) {
+            pagerState.scrollToPage(sharedPage)
+        }
+    }
 
     fun openUrl(url: String) {
         runCatching {
@@ -797,32 +819,22 @@ fun RootApp(auto: String?, initialTab: Int, initialSub: String?) {
                         }
                     }
                 } else {
-                    // v2.22.83: shell switch gets a transition (fade + slight
-                    // horizontal drift + scale) instead of a hard swap.
+                    // v2.22.84: seamless shell switch. Both shells stay
+                    // composed in a stack; the inactive one is hidden by
+                    // shellLayer (transparent, input-swallowing, no
+                    // semantics). Nothing is disposed or rebuilt on a
+                    // switch, so scroll positions and page state survive,
+                    // and sharedPage lands the user on the same tab in
+                    // the other shell. The .83 slide/fade transition is
+                    // gone: the switch is instant, no in-between frames.
                     val sukisuActive = settings.uiSkin == "sukisu" &&
                         !com.rootsentinel.data.SkinBridge.forceKsuOnce
-                    androidx.compose.animation.AnimatedContent(
-                        targetState = sukisuActive,
-                        transitionSpec = {
-                            (androidx.compose.animation.fadeIn(
-                                androidx.compose.animation.core.tween(260)
-                            ) + androidx.compose.animation.slideInHorizontally(
-                                androidx.compose.animation.core.tween(260)
-                            ) { w -> if (targetState) w / 8 else -w / 8 } +
-                                androidx.compose.animation.scaleIn(
-                                    androidx.compose.animation.core.tween(260),
-                                    initialScale = 0.985f
-                                )).togetherWith(
-                                androidx.compose.animation.fadeOut(
-                                    androidx.compose.animation.core.tween(180)
-                                ) + androidx.compose.animation.slideOutHorizontally(
-                                    androidx.compose.animation.core.tween(180)
-                                ) { w -> if (targetState) -w / 8 else w / 8 }
-                            )
-                        },
-                        label = "shellSwitch",
-                    ) { isSukisu ->
-                        if (isSukisu) {
+                    Box(Modifier.fillMaxSize()) {
+                        Box(
+                            Modifier
+                                .fillMaxSize()
+                                .shellLayer(active = sukisuActive),
+                        ) {
                             // v2.22.71: SukiSU-Nova shell (vendored UI, RS pager data).
                             SukisuShell(
                                 rsPageScale = settings.pageScale,
@@ -830,8 +842,16 @@ fun RootApp(auto: String?, initialTab: Int, initialSub: String?) {
                                 reportActions = reportActions,
                                 historyEntries = history.entries,
                                 onClearHistory = { history.clear() },
+                                active = sukisuActive,
+                                sharedPage = sharedPage,
+                                onSharedPageChanged = { sharedPage = it },
                             )
-                        } else {
+                        }
+                        Box(
+                            Modifier
+                                .fillMaxSize()
+                                .shellLayer(active = !sukisuActive),
+                        ) {
                             MainScreen(
                                 mainPagerState = mainPagerState,
                                 pagerInterceptionMode = settings.pagerInterceptionMode,
@@ -887,6 +907,31 @@ fun RootApp(auto: String?, initialTab: Int, initialSub: String?) {
  * FloatingBottomBar / SideRail 双形态。
  */
 @Composable
+/**
+ * v2.22.84: one layer of the seamless shell stack. The active shell is
+ * raised above the inactive one; the inactive shell stays composed (so
+ * its state survives a switch) but is fully transparent, hidden from
+ * accessibility, and swallows any touches that fall through the active
+ * shell above it.
+ */
+private fun Modifier.shellLayer(active: Boolean): Modifier {
+    var result = this
+        .zIndex(if (active) 1f else 0f)
+        .graphicsLayer { alpha = if (active) 1f else 0f }
+    if (!active) {
+        result = result
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) {
+                        awaitPointerEvent().changes.forEach { it.consume() }
+                    }
+                }
+            }
+            .semantics { invisibleToUser() }
+    }
+    return result
+}
+
 private fun MainScreen(
     mainPagerState: MainPagerState,
     pagerInterceptionMode: Int,

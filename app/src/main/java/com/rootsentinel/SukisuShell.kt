@@ -26,6 +26,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -135,6 +136,13 @@ fun SukisuShell(
     reportActions: ReportActions,
     historyEntries: List<com.rootsentinel.data.HistoryEntry>,
     onClearHistory: () -> Unit,
+    // v2.22.84: seamless shell switch — this shell now stays composed
+    // while the KernelSU shell is in front. [active] gates its back
+    // handler; [sharedPage]/[onSharedPageChanged] keep the tab position
+    // in sync with the other shell (same tab order in both).
+    active: Boolean = true,
+    sharedPage: Int? = null,
+    onSharedPageChanged: ((Int) -> Unit)? = null,
 ) {
     val mainViewModel = viewModel<MainActivityViewModel>()
     val uiState by mainViewModel.uiState.collectAsStateWithLifecycle()
@@ -196,8 +204,12 @@ fun SukisuShell(
             val mainScreenEntry: @Composable () -> Unit = {
                 SukisuPager(
                     navigator = navigator,
-                    initialPage = selectedMainPage,
-                    onPageChanged = mainViewModel::setSelectedMainPage,
+                    initialPage = sharedPage ?: selectedMainPage,
+                    onPageChanged = { page ->
+                        mainViewModel.setSelectedMainPage(page)
+                        onSharedPageChanged?.invoke(page)
+                    },
+                    shellActive = active,
                     pagerInterceptionMode = uiState.pagerInterceptionMode,
                     reportState = reportState,
                     reportActions = reportActions,
@@ -410,6 +422,7 @@ private fun SukisuPager(
     navigator: Navigator,
     initialPage: Int,
     onPageChanged: (Int) -> Unit,
+    shellActive: Boolean = true,
     pagerInterceptionMode: Int,
     reportState: ReportUiState,
     reportActions: ReportActions,
@@ -444,7 +457,7 @@ private fun SukisuPager(
     val currentPage = pagerState.currentPage
     LaunchedEffect(currentPage) { mainPagerState.syncPage() }
 
-    SukisuMainBackHandler(mainPagerState, navigator)
+    SukisuMainBackHandler(mainPagerState, navigator, shellActive)
 
     val hasBg = LocalBackgroundImagePath.current.isNotEmpty()
     val cardAlpha = LocalCardBackgroundAlpha.current
@@ -571,10 +584,15 @@ private fun SukisuPager(
 private fun SukisuMainBackHandler(
     mainPagerState: MainPagerState,
     navigator: Navigator,
+    shellActive: Boolean = true,
 ) {
+    // v2.22.84: while this shell is hidden behind the other one, its
+    // back handler must not fire — the visible shell owns back presses.
+    val activeState = rememberUpdatedState(shellActive)
     val isEnabled = remember {
         androidx.compose.runtime.derivedStateOf {
-            navigator.current() is Route.Main && navigator.backStackSize() == 1 &&
+            activeState.value &&
+                navigator.current() is Route.Main && navigator.backStackSize() == 1 &&
                 mainPagerState.selectedPage != 0
         }
     }
