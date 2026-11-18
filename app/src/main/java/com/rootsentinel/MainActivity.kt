@@ -821,19 +821,38 @@ fun RootApp(auto: String?, initialTab: Int, initialSub: String?) {
                 } else {
                     // v2.22.84: seamless shell switch. Both shells stay
                     // composed in a stack; the inactive one is hidden by
-                    // shellLayer (transparent, input-swallowing, no
-                    // semantics). Nothing is disposed or rebuilt on a
-                    // switch, so scroll positions and page state survive,
-                    // and sharedPage lands the user on the same tab in
-                    // the other shell. The .83 slide/fade transition is
-                    // gone: the switch is instant, no in-between frames.
+                    // shellLayer (input-swallowing, no semantics).
+                    // Nothing is disposed or rebuilt on a switch, so
+                    // scroll positions and page state survive, and
+                    // sharedPage lands the user on the same tab in the
+                    // other shell. v2.22.85 adds the crossfade below.
                     val sukisuActive = settings.uiSkin == "sukisu" &&
                         !com.rootsentinel.data.SkinBridge.forceKsuOnce
+                    // v2.22.85: the switch crossfades — the outgoing
+                    // shell fades out while the incoming one fades in,
+                    // so there is no cut at all. (.84 revealed the other
+                    // shell instantly, which still read as a hard cut.)
+                    val sukisuAlpha = androidx.compose.animation.core.animateFloatAsState(
+                        targetValue = if (sukisuActive) 1f else 0f,
+                        animationSpec = androidx.compose.animation.core.tween(
+                            durationMillis = 240,
+                            easing = androidx.compose.animation.core.FastOutSlowInEasing,
+                        ),
+                        label = "sukisuShellAlpha",
+                    )
+                    val ksuAlpha = androidx.compose.animation.core.animateFloatAsState(
+                        targetValue = if (sukisuActive) 0f else 1f,
+                        animationSpec = androidx.compose.animation.core.tween(
+                            durationMillis = 240,
+                            easing = androidx.compose.animation.core.FastOutSlowInEasing,
+                        ),
+                        label = "ksuShellAlpha",
+                    )
                     Box(Modifier.fillMaxSize()) {
                         Box(
                             Modifier
                                 .fillMaxSize()
-                                .shellLayer(active = sukisuActive),
+                                .shellLayer(active = sukisuActive, alphaState = sukisuAlpha),
                         ) {
                             // v2.22.71: SukiSU-Nova shell (vendored UI, RS pager data).
                             SukisuShell(
@@ -850,7 +869,7 @@ fun RootApp(auto: String?, initialTab: Int, initialSub: String?) {
                         Box(
                             Modifier
                                 .fillMaxSize()
-                                .shellLayer(active = !sukisuActive),
+                                .shellLayer(active = !sukisuActive, alphaState = ksuAlpha),
                         ) {
                             MainScreen(
                                 mainPagerState = mainPagerState,
@@ -909,14 +928,19 @@ fun RootApp(auto: String?, initialTab: Int, initialSub: String?) {
 /**
  * v2.22.84: one layer of the seamless shell stack. The active shell is
  * raised above the inactive one; the inactive shell stays composed (so
- * its state survives a switch) but is fully transparent, hidden from
- * accessibility, and swallows any touches that fall through the active
- * shell above it.
+ * its state survives a switch) but is hidden from accessibility and
+ * swallows any touches that fall through the active shell above it.
+ * v2.22.85: visibility is an animated alpha (crossfade between the two
+ * shells), read inside the graphics layer so the fade runs at draw
+ * time without recomposing either shell.
  */
-private fun Modifier.shellLayer(active: Boolean): Modifier {
+private fun Modifier.shellLayer(
+    active: Boolean,
+    alphaState: androidx.compose.runtime.State<Float>,
+): Modifier {
     var result = this
         .zIndex(if (active) 1f else 0f)
-        .graphicsLayer { alpha = if (active) 1f else 0f }
+        .graphicsLayer { alpha = alphaState.value }
     if (!active) {
         result = result
             .pointerInput(Unit) {
