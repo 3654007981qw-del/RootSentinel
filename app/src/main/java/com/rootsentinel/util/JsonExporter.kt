@@ -201,6 +201,9 @@ object JsonExporter {
         score.put("environmentScore", result.score.environmentScore)
         score.put("integrityBreach", result.score.integrityBreach)
         score.put("envRisk", result.score.envRisk)
+        // v2.22.82 E1：影子评分（同源折减试算，未生效）
+        score.put("shadowScore", result.score.shadowScore)
+        score.put("shadowGrade", result.score.shadowGrade.name)
         val notes = org.json.JSONArray()
         result.score.notes.forEach { notes.put(it) }
         score.put("notes", notes)

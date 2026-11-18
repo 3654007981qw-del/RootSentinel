@@ -104,6 +104,14 @@ data class Evidence(
      * 所以老代码不需要改；只有 ERROR / SKIPPED / TIMEOUT 才需要显式设置。
      */
     val state: EvidenceState? = null,
+    /**
+     * 证据来源组（v2.22.82，联合审查 E1）。同一底层事实派生的
+     * 多条证据共享一个组名（如 /data/adb 的状态同时喂给
+     * A.DATA_ADB 与 A.MODULES_DIR → 同组 "fs:/data/adb"）。
+     * 空 = 独立来源。当前只供影子评分做同源折减试算，
+     * 不影响正式分数；native 侧经协议字段 sg 传入。
+     */
+    val sourceGroup: String = "",
 ) {
     /** 用于评分与展示的最终状态 */
     val effectiveState: EvidenceState get() = state ?: EvidenceState.of(verdict)
@@ -195,6 +203,11 @@ data class ScoreResult(
     /** 硬件证明确认启动链不可信（TEE 签名，无法伪造） */
     val integrityBreach: Boolean = false,
     val envRisk: Boolean = false,
+    // ---- v2.22.82 E1 影子评分（同源证据折减试算，未生效） ----
+    /** 影子总分：与 score 同口径，但同 sourceGroup 的 HIT 先做组内折减 */
+    val shadowScore: Double = score,
+    /** 影子等级：用影子总分走同一套阈值与完整性门槛得到的等级 */
+    val shadowGrade: Grade = grade,
 )
 
 /**
@@ -543,6 +556,11 @@ object ScoringModel {
         var errored = 0
         var skipped = 0
 
+        // v2.22.82（联合审查 E1）影子评分的分组桶：key =
+        // "维度|硬软|来源组"，value = 该组每条 HIT 的单条得分。
+        // 正式分数照旧逐条累加；影子分数在主循环后按组折减汇总。
+        val shadowBuckets = mutableMapOf<String, MutableList<Double>>()
+
         for (e in deduped) {
             // v2.4.1：按显式状态分流，而不是只看三态 verdict。
             // ERROR / TIMEOUT 不是「检测通过了」，也不是「检测没读到」，
@@ -569,7 +587,8 @@ object ScoringModel {
 
                     // v2.4.0：按维度分流。只有 ROOT 维度进入 hard/soft/rootScore，
                     // 另外两个维度单独累计，不再把「解锁」「装了管理器」算成 root。
-                    when (dimensionOf(e)) {
+                    val dim = dimensionOf(e)
+                    when (dim) {
                         Dimension.ROOT -> {
                             rootScore += s
                             if (e.heuristic) soft += s else hard += s
@@ -578,6 +597,14 @@ object ScoringModel {
                         Dimension.INTEGRITY -> integrityScore += s
                         Dimension.ENVIRONMENT -> envScore += s
                     }
+
+                    // E1 影子评分：同一条得分另记进来源组桶（无组证据
+                    // 以自身 ID 为组，组内只有一条时折减公式退化为原值）。
+                    val groupKey = e.sourceGroup.ifEmpty { "solo:" + e.id }
+                    val bucketKey = dim.name + "|" +
+                        (if (dim == Dimension.ROOT && e.heuristic) "S" else "H") +
+                        "|" + groupKey
+                    shadowBuckets.getOrPut(bucketKey) { mutableListOf() } += s
                 }
             }
         }
@@ -598,6 +625,30 @@ object ScoringModel {
                 notes += "交叉验证矛盾: ${c.subject}"
             }
         }
+
+        // ---------------------------------------------------------- E1 影子汇总
+        // 组内折减：贡献 = 最高一条 + 其余每条 × 0.25。含义：同一
+        // 底层事实派生的多条命中只按「一个主证据 + 弱佐证」计，
+        // 不再等同于多个独立传感器各自确认。交叉矛盾加成与正式
+        // 口径一致（它证明的是观测通道被干扰，不归任何来源组）。
+        var shadowHard = 0.0
+        var shadowSoft = 0.0
+        var shadowIntegrity = 0.0
+        var shadowHook = 0.0
+        var shadowEnv = 0.0
+        for ((key, list) in shadowBuckets) {
+            val parts = key.split("|", limit = 3)
+            val sorted = list.sortedDescending()
+            val contrib = sorted.first() + sorted.drop(1).sum() * 0.25
+            when (parts[0]) {
+                "ROOT" -> if (parts[1] == "S") shadowSoft += contrib else shadowHard += contrib
+                "HOOK" -> shadowHook += contrib
+                "INTEGRITY" -> shadowIntegrity += contrib
+                "ENVIRONMENT" -> shadowEnv += contrib
+            }
+        }
+        shadowHook += crosses.count { !it.consistent } * CROSSCHECK_BONUS
+        var shadowTotal = shadowHard + shadowSoft
 
         var total = hard + soft
 
@@ -718,6 +769,12 @@ object ScoringModel {
             hard *= factor
             soft *= factor
             total = hard + soft
+            // E1：影子总分同比例折扣，保持与正式口径可比。
+            if (shadowTotal > 0.0) {
+                shadowHard *= factor
+                shadowSoft *= factor
+                shadowTotal = shadowHard + shadowSoft
+            }
             notes += "可读率仅 ${(coverage * 100).toInt()}%，总分已按 ×" +
                 String.format("%.2f", factor) + " 折扣（" +
                 String.format("%.1f", before) + " → " + String.format("%.1f", total) + "）"
@@ -758,6 +815,24 @@ object ScoringModel {
             coverage < 0.6 -> Grade.INCOMPLETE
 
             else -> Grade.CLEAN
+        }
+
+        // E1 影子等级：同一套阈值与完整性门槛，只换总分。
+        val shadowGrade = when {
+            shadowTotal >= 85.0 -> Grade.ROOTED_HIDING
+            hasHiding && shadowTotal >= 40.0 -> Grade.ROOTED_HIDING
+            shadowTotal >= 40.0 -> Grade.ROOTED
+            shadowTotal >= 10.0 -> Grade.SUSPICIOUS
+            nativeFailed || stageFailed > 0 || errored > 0 || tooFew || cancelledScan ||
+                versionMismatch || protocolBroken ||
+                (items.isEmpty() && crosses.isEmpty()) -> Grade.INCOMPLETE
+            coverage < 0.6 -> Grade.INCOMPLETE
+            else -> Grade.CLEAN
+        }
+        if (kotlin.math.abs(shadowTotal - total) > 0.001) {
+            notes += "影子评分（同源证据折减试算，未生效）：影子 " +
+                String.format("%.1f", shadowTotal) + " 分 / ${shadowGrade.name}，" +
+                "正式 " + String.format("%.1f", total) + " 分 / ${grade.name}"
         }
 
         if (integrityScore > 0.0) {
@@ -806,6 +881,8 @@ object ScoringModel {
             environmentScore = envScore,
             integrityBreach = integrityBreach,
             envRisk = envScore >= 10.0,
+            shadowScore = shadowTotal,
+            shadowGrade = shadowGrade,
         )
     }
 }

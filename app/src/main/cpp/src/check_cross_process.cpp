@@ -5,14 +5,22 @@
 //   fork 一个子进程做同样的观测，若父子结果不一致，
 //   就说明存在进程级 hook —— 这是最难伪造的证据。
 //
+// v2.22.82（联合审查 N2）定位修正：fork 子进程会继承父进程
+// 的地址空间与已注入状态，它不是一个真正独立启动的进程。
+// 本项只作启发式互证（证据带 heuristic 标记）；主跨进程通道
+// 是 Java 侧 CrossProcessProbe（:probe 独立进程服务）。
+//
 // 实现约束：
 //   子进程只调用 raw syscall（不 malloc、不碰锁），
 //   避免多线程 fork 引发的死锁。
 #include "rs_checks.h"
 
 #include <cerrno>
+#include <chrono>
+#include <csignal>
 #include <cstdio>
 #include <cstring>
+#include <poll.h>
 #include <unistd.h>
 #include <atomic>
 #include <mutex>
@@ -73,10 +81,17 @@ void checkCrossProcess(ScanReport& r) {
     // 不再产生。现在只有拿到完整观测才缓存并置 done；失败只给本次
     // 扫描补一条 UNKNOWN，下次扫描重试。
     static std::atomic<bool> done{false};
+    static std::atomic<long long> cachedAtMs{0};
     static std::mutex cacheMutex;
     static std::vector<Evidence> cachedEvidence;
     static std::vector<CrossCheck> cachedCrosses;
-    if (done.load(std::memory_order_acquire)) {
+    // v2.22.82（联合审查 N2）：缓存加 60 秒有效期。旧版进程生命
+    // 周期内永不过期，后续扫描一直重放首次观测，节点状态变化
+    // （如扫描期间环境改变）完全看不到。过期则重新 fork 观测。
+    const long long nowMs = (long long)std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    if (done.load(std::memory_order_acquire) &&
+        nowMs - cachedAtMs.load(std::memory_order_acquire) <= 60000) {
         std::lock_guard<std::mutex> lk(cacheMutex);
         for (const auto& cc : cachedCrosses) r.addCross(cc);
         for (const auto& e : cachedEvidence) r.add(e);
@@ -112,15 +127,44 @@ void checkCrossProcess(ScanReport& r) {
     // ---- 父进程 ----
     close(fds[1]);
     char buf[4] = {0, 0, 0, 0};
-    ssize_t n = read(fds[0], buf, 3);
+    // v2.22.82（联合审查 N2）：旧版裸 read() 无超时——子进程若
+    // 卡死（被注入环境拖住、写管异常），父进程会连同整轮扫描
+    // 一起挂死。改 poll 限时读满 3 字节；超时杀子进程并出
+    // UNKNOWN（不落缓存，下轮重试，沿用 P3-02 语义）。
+    ssize_t got = 0;
+    bool timedOut = false;
+    while (got < 3) {
+        pollfd pfd{};
+        pfd.fd = fds[0];
+        pfd.events = POLLIN;
+        int pr = poll(&pfd, 1, 2000);
+        if (pr == 0) { timedOut = true; break; }
+        if (pr < 0) {
+            if (errno == EINTR) continue;
+            break;
+        }
+        ssize_t n = read(fds[0], buf + got, (size_t)(3 - got));
+        if (n <= 0) break;
+        got += n;
+    }
     close(fds[0]);
+
+    if (timedOut) {
+        kill(pid, SIGKILL);
+        int st2 = 0;
+        waitpid(pid, &st2, 0);
+        r.add(makeUnknown(RSs("X.CHILD_PROC"), Category::CROSSCHECK,
+                          Severity::LOW, RSs("子进程观测超时，跳过子进程交叉验证")));
+        return;
+    }
 
     int status = 0;
     waitpid(pid, &status, 0);
 
-    if (n != 3) {
+    // 子进程异常退出（被杀/崩溃）时管道里的数据不可信，一并作废。
+    if (got != 3 || !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
         r.add(makeUnknown(RSs("X.CHILD_PROC"), Category::CROSSCHECK,
-                          Severity::LOW, RSs("子进程未返回观测结果")));
+                          Severity::LOW, RSs("子进程未返回完整观测结果")));
         return;
     }
 
@@ -155,6 +199,7 @@ void checkCrossProcess(ScanReport& r) {
     if (same) {
         Evidence e = makePass(RSs("X.CHILD_PROC"), Category::CROSSCHECK,
                               RSs("父子进程观测一致"));
+        e.heuristic = true;  // N2：fork 继承注入状态，只作启发式互证
         e.addVector(RSs("child"), childStr);
         e.addVector(RSs("parent"), parentStr);
         e.detail = RSs("v/s/a = version可读/stat可读/data_adb(V=可见 E=EACCES N=不存在)");
@@ -163,6 +208,7 @@ void checkCrossProcess(ScanReport& r) {
         Evidence e = makeHit(RSs("X.CHILD_PROC"), Category::CROSSCHECK,
                              Severity::CRITICAL, Confidence::HIGH,
                              RSs("父子进程观测不一致 ← 进程级 hook"));
+        e.heuristic = true;  // N2：同上，启发式互证（主通道为 Java 独立进程探针）
         e.addVector(RSs("child"), childStr);
         e.addVector(RSs("parent"), parentStr);
         e.detail = RSs("同一 uid、同一 SELinux 域，两个进程看到不同结果，"
@@ -172,12 +218,14 @@ void checkCrossProcess(ScanReport& r) {
         out.push_back(std::move(e));
     }
 
-    // 观测完整才落缓存并置 done（P3-02）；之后扫描直接重放缓存。
+    // 观测完整才落缓存并置 done（P3-02）；60 秒内扫描直接重放
+    // 缓存，过期后下轮重新观测（N2）。
     {
         std::lock_guard<std::mutex> lk(cacheMutex);
         cachedEvidence = out;
         cachedCrosses = crosses;
     }
+    cachedAtMs.store(nowMs, std::memory_order_release);
     done.store(true, std::memory_order_release);
     for (const auto& cc : crosses) r.addCross(cc);
     for (const auto& e : out) r.add(e);

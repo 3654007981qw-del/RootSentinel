@@ -86,30 +86,44 @@ void checkArtifacts(ScanReport& r) {
     // ---------------------------------------------------------- /data/adb
     // 这是唯一有意义的 EACCES：/data 是 0771，App 有 x 位能 stat 子项
     const std::string kAdb = RSs("/data/adb");
-    const int st = accessState(kAdb, 0 /* F_OK */);
+    // v2.22.82（联合审查 N1）：改用 errno 精确探针。旧版 else 分支
+    // 把 accessState 的 2（任何非 EACCES 错误）直接判 PASS 并在
+    // 文案里断言 ENOENT——EIO/ENOSYS 也会被写成「隐藏完整」。
+    // 现在只有真 ENOENT 才 PASS，其余错误 UNKNOWN。
+    const int adbErr = accessErrnoRaw(kAdb, 0 /* F_OK */);
 
-    if (st == 0) {
+    if (adbErr == 0) {
         sys::statx_buf sx{};
         const bool isDir = (sys::statx_(kAdb.c_str(), &sx, nullptr, 0) == 0);
         Evidence e = makeHit(RSs("A.DATA_ADB"), Category::ARTIFACT,
                              Severity::CRITICAL, Confidence::HIGH,
                              RSs("/data/adb 可访问 ← root 方案数据目录外露"));
+        e.sourceGroup = RSs("fs:/data/adb");  // E1：与 A.MODULES_DIR 同源
         e.addVector(RSs("faccessat"), RSs("visible"));
         e.addVector(RSs("statx"), isDir ? RSs("dir") : RSs("unknown"));
         r.add(std::move(e));
-    } else if (st == 1) {
+    } else if (adbErr == EACCES || adbErr == EPERM) {
         Evidence e = makeHit(RSs("A.DATA_ADB"), Category::ARTIFACT,
                              Severity::HIGH, Confidence::HIGH,
                              RSs("/data/adb 返回 EACCES ← 目录存在（原厂没有此目录）"));
+        e.sourceGroup = RSs("fs:/data/adb");
         e.addVector(RSs("faccessat"), RSs("EACCES"));
         e.addVector(RSs("statx"),
                     fileExistsRaw(kAdb) ? RSs("exists") : RSs("hidden"));
         e.fp_note = RSs("极少数老设备 ROM 会预置 /data/adb；"
                         "vivo/OPPO/小米原厂均无");
         r.add(std::move(e));
-    } else {
+    } else if (adbErr == ENOENT) {
         r.add(makePass(RSs("A.DATA_ADB"), Category::ARTIFACT,
-                       RSs("/data/adb 返回 ENOENT（隐藏完整）")));
+                       RSs("/data/adb 返回 ENOENT（隐藏完整）"))
+                  .withSourceGroup(RSs("fs:/data/adb")));
+    } else {
+        Evidence e = makeUnknown(RSs("A.DATA_ADB"), Category::ARTIFACT,
+                                 Severity::LOW,
+                                 RSs("/data/adb 观测失败（不可验）"));
+        e.sourceGroup = RSs("fs:/data/adb");
+        e.addVector(RSs("errno"), std::to_string(adbErr));
+        r.add(std::move(e));
     }
 
     // ---------------------------------------------------------- 目录枚举互验

@@ -35,6 +35,17 @@ class NativeReportParserTest {
     }
 
     @Test
+    fun sourceGroupParsesAndDefaultsEmpty() {
+        // v2.22.82 E1：sg 字段解析；缺失时为空（独立来源）。
+        val withSg = """{"id":"A.DATA_ADB","category":"A","severity":"HIGH",""" +
+            """"confidence":"HIGH","verdict":"HIT","title":"t","sg":"fs:/data/adb"}"""
+        val parsed = NativeReportParser.parse(report(withSg))
+        assertEquals("fs:/data/adb", parsed.items[0].sourceGroup)
+        val without = NativeReportParser.parse(report(item()))
+        assertEquals("", without.items[0].sourceGroup)
+    }
+
+    @Test
     fun unknownSeverityFlagsProtocolErrorAndForcesUnknown() {
         val parsed = NativeReportParser.parse(report(item(severity = "MEGA")))
         assertTrue(parsed.protocolError)

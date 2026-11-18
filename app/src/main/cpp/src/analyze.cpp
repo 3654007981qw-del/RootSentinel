@@ -115,6 +115,8 @@ void analyze(ScanReport& r) {
                           RSs("方案画像: ") + scheme);
     e.detail = r.profile.is_emulator ? RSs("运行于模拟器") : RSs("运行于物理设备");
     e.addVector(RSs("hiding"), hiding ? RSs("yes") : RSs("no"));
+    // v2.22.82 N3：记录本轮模块乱序种子，凭种子可复现执行顺序。
+    if (r.shuffleSeed != 0) e.addVector(RSs("seed"), std::to_string(r.shuffleSeed));
     r.add(std::move(e));
 
     if (hiding) {
@@ -167,6 +169,8 @@ std::string serializeReport(const ScanReport& r) {
         j.kv(RSs("confidence"), confidenceName(e.confidence));
         j.kv(RSs("verdict"), verdictName(e.verdict));
         j.kv(RSs("heuristic"), e.heuristic);
+        // v2.22.82 E1：来源组（additive 字段，老解析器忽略即可）
+        if (!e.sourceGroup.empty()) j.kv(RSs("sg"), e.sourceGroup);
         j.kv(RSs("title"), e.title);
         if (!e.detail.empty()) j.kv(RSs("detail"), e.detail);
 

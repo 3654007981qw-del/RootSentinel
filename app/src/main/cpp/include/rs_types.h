@@ -63,6 +63,7 @@ struct Evidence {
     Confidence              confidence   = Confidence::LOW;
     Verdict                 verdict      = Verdict::UNKNOWN;
     bool                    heuristic    = false;  // true = 软证据（启发式）
+    std::string             sourceGroup;           // v2.22.82 E1：证据来源组（同源折减影子评分；空 = 独立来源）
     std::string             title;                 // 一句话结论
     std::string             detail;                // 详细说明（含原始值）
     std::vector<std::string> vectors;              // 各视角观测："view=value"
@@ -86,6 +87,14 @@ struct Evidence {
 
     void addVector(const std::string& view, const std::string& value) {
         vectors.push_back(view + "=" + value);
+    }
+
+    // v2.22.82 E1：给证据打来源组（同一底层事实派生的证据同组，
+    // 供 Kotlin 侧影子评分做同源折减）。右值限定，链式用在
+    // makeHit/makePass/makeUnknown 的临时对象上。
+    Evidence withSourceGroup(std::string g) && {
+        sourceGroup = std::move(g);
+        return std::move(*this);
     }
 };
 
@@ -127,6 +136,10 @@ struct ScanReport {
     std::vector<Evidence>  items;
     std::vector<CrossCheck> crosses;
     DeviceProfile          profile;
+    // v2.22.82 N3：本轮 Native 模块乱序种子（jni.cpp 注入，
+    // analyze 附到 Z.SCHEME 的 vector 供复现）。仅 native 内部
+    // 使用，不进跨语言协议。
+    unsigned               shuffleSeed = 0;
 
     // 进度回调：由 jni.cpp 注入，用于把每一条证据实时推给 Java
     void (*onItem)(const Evidence&, void*) = nullptr;

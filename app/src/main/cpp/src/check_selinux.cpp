@@ -195,15 +195,25 @@ void checkSelinux(ScanReport& r) {
 
     int deniedAccess = 0;
     int deniedMissing = 0;
+    int otherErr = 0;
+    int readable = 0;
     std::string firstDenied;
     for (const auto& p : baseline) {
-        const int st = accessState(p, R_OK);
-        if (st == 1) {
+        // v2.22.82（联合审查 N1）：改用 errno 精确探针。旧版把
+        // accessState 的 2 一律当 ENOENT 计入 deniedMissing，
+        // EIO/ENOSYS/ENOTDIR 也能凑出「过度隐藏」HIT。现在只有
+        // 真 ENOENT 算缺席，其余错误单列且不计入 denied。
+        const int err = accessErrnoRaw(p, R_OK);
+        if (err == 0) {
+            ++readable;
+        } else if (err == EACCES || err == EPERM) {
             ++deniedAccess;
             if (firstDenied.empty()) firstDenied = p;
-        } else if (st == 2) {
+        } else if (err == ENOENT) {
             ++deniedMissing;
             if (firstDenied.empty()) firstDenied = p + RSs(" (ENOENT)");
+        } else {
+            ++otherErr;
         }
     }
     const int denied = deniedAccess + deniedMissing;
@@ -215,6 +225,7 @@ void checkSelinux(ScanReport& r) {
                                    std::to_string(baseline.size()));
         e.addVector(RSs("eacces"), std::to_string(deniedAccess));
         e.addVector(RSs("enoent"), std::to_string(deniedMissing));
+        if (otherErr > 0) e.addVector(RSs("other"), std::to_string(otherErr));
         e.addVector(RSs("first"), firstDenied);
         e.detail = RSs("读不到比读得到更可疑：检测器一行代码即可判定异常");
         r.add(std::move(e));
@@ -229,9 +240,18 @@ void checkSelinux(ScanReport& r) {
         e.fp_note = RSs("个别厂商 / Android 版本的 SELinux 策略会让单个"
                         "/proc 节点对 App 不可读，单点不足以判定过度隐藏");
         r.add(std::move(e));
-    } else {
+    } else if (readable == (int)baseline.size()) {
         r.add(makePass(RSs("F.OVER_HIDING"), Category::SELINUX,
                        RSs("8 个基线节点全部可读（符合原厂）")));
+    } else {
+        // 既无拒绝也非全可读：有节点返回了 EACCES/ENOENT 之外的
+        // 错误，观测不完整，不下「全部可读」的 PASS。
+        Evidence e = makeUnknown(RSs("F.OVER_HIDING"), Category::SELINUX,
+                                 Severity::LOW,
+                                 RSs("基线节点观测不完整（不可验）"));
+        e.addVector(RSs("other"), std::to_string(otherErr));
+        e.addVector(RSs("readable"), std::to_string(readable));
+        r.add(std::move(e));
     }
 }
 

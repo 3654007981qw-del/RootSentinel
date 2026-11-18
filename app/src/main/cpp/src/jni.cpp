@@ -8,8 +8,15 @@
 #include <android/log.h>
 
 #include <atomic>
+#include <algorithm>
+#include <chrono>
+#include <functional>
 #include <mutex>
+#include <random>
 #include <string>
+#include <unistd.h>
+#include <utility>
+#include <vector>
 
 #include "rs_checks.h"
 #include "rs_str.h"
@@ -247,98 +254,70 @@ Java_com_rootsentinel_NativeBridge_nativeScan(JNIEnv* env, jobject /*thiz*/,
     report.user    = nullptr;
 
     // ---------------------------------------------------------- 逐模块执行
-    notifyModule("A · 经典痕迹");
-    checkArtifacts(report);
-    notifyModule("A · 运行环境真实性");
-    checkEmulator(report);
-    notifyModule("A · root 方案指纹");
-    checkMagiskFamily(report);
-    notifyModule("A · 硬件指纹");
-    checkHwExt(report);
-    notifyModule("B · 属性与启动状态");
-    checkProps(report);
-    notifyModule("B · 安全补丁级别");
-    checkSecurityPatch(report);
-    notifyModule("C · 挂载与命名空间");
-    checkMount(report);
-    notifyModule("C · 文件系统元数据");
-    checkFsMeta(report);
-    notifyModule("C · 文件系统物理层");
-    checkFsDeep(report);
-    notifyModule("C · 存储视图与硬件");
-    checkSandbox(report);
-    notifyModule("C · 文件时间与物理块");
-    checkFsTime(report);
-    notifyModule("D · 内存与注入");
-    checkMemory(report);
-    notifyModule("D · 线程与匿名 fd");
-    checkThreads(report);
-    notifyModule("D · 匿名可执行映射");
-    checkAnonExec(report);
-    notifyModule("D · proc 深度");
-    checkProcExt(report);
-    notifyModule("D · DEX / OAT 加载");
-    checkDex(report);
+    // v2.22.82（联合审查 N3）：模块执行顺序每轮随机。旧版 Java 阶段
+    // 已 shuffled、Native 阶段却写死顺序，固定顺序本身就是可被
+    // 针对性研究的特征。已核实各 check 模块之间没有结果依赖
+    // （只有 analyze 读全量 items），故除 analyze 固定收尾外其余
+    // 全部打乱；种子写入 report.shuffleSeed 并由 analyze 附到
+    // Z.SCHEME 的 vector 里，需要时可按种子复现顺序。定位说明：
+    // 随机化只抬高针对性绕过的成本，不代替数据源独立性。
+    std::vector<std::pair<const char*, std::function<void(ScanReport&)>>> steps;
+    steps.reserve(41);
+    auto add = [&steps](const char* label, std::function<void(ScanReport&)> fn) {
+        steps.emplace_back(label, std::move(fn));
+    };
+    add("A · 经典痕迹", [](ScanReport& r) { checkArtifacts(r); });
+    add("A · 运行环境真实性", [](ScanReport& r) { checkEmulator(r); });
+    add("A · root 方案指纹", [](ScanReport& r) { checkMagiskFamily(r); });
+    add("A · 硬件指纹", [](ScanReport& r) { checkHwExt(r); });
+    add("B · 属性与启动状态", [](ScanReport& r) { checkProps(r); });
+    add("B · 安全补丁级别", [](ScanReport& r) { checkSecurityPatch(r); });
+    add("C · 挂载与命名空间", [](ScanReport& r) { checkMount(r); });
+    add("C · 文件系统元数据", [](ScanReport& r) { checkFsMeta(r); });
+    add("C · 文件系统物理层", [](ScanReport& r) { checkFsDeep(r); });
+    add("C · 存储视图与硬件", [](ScanReport& r) { checkSandbox(r); });
+    add("C · 文件时间与物理块", [](ScanReport& r) { checkFsTime(r); });
+    add("D · 内存与注入", [](ScanReport& r) { checkMemory(r); });
+    add("D · 线程与匿名 fd", [](ScanReport& r) { checkThreads(r); });
+    add("D · 匿名可执行映射", [](ScanReport& r) { checkAnonExec(r); });
+    add("D · proc 深度", [](ScanReport& r) { checkProcExt(r); });
+    add("D · DEX / OAT 加载", [](ScanReport& r) { checkDex(r); });
+    add("E · Hook 框架", [](ScanReport& r) { checkHooks(r); });
+    add("E · ART 与符号归属", [](ScanReport& r) { checkArtDeep(r); });
+    add("E · ArtMethod 归属", [env](ScanReport& r) { checkArtMethod(env, r); });
+    add("E · 内联 hook 形态", [](ScanReport& r) { checkPltHooks(r); });
+    add("E · 反调试与进程来源", [](ScanReport& r) { checkAntiDebug(r); });
+    add("F · SELinux", [](ScanReport& r) { checkSelinux(r); });
+    add("F · SELinux 行为交叉验证", [](ScanReport& r) { checkSelinuxXcheck(r); });
+    add("F · 内核标识", [](ScanReport& r) { checkKernel(r); });
+    add("F · 启动链", [](ScanReport& r) { checkInitChain(r); });
+    add("F · 内核设备与模块", [](ScanReport& r) { checkKernelDeep(r); });
+    add("F · 内核 taint", [](ScanReport& r) { checkKernelTaint(r); });
+    add("F · 内核维护状态", [](ScanReport& r) { checkKernelEol(r); });
+    add("F · 内核安全子系统", [](ScanReport& r) { checkKernelExt(r); });
+    add("G · eBPF 与硬件证明", [](ScanReport& r) { checkBpf(r); });
+    add("I · 库完整性", [](ScanReport& r) { checkIntegrity(r); });
+    add("I · 代码段比对", [](ScanReport& r) { checkTextHash(r); });
+    add("I · 进程凭据", [](ScanReport& r) { checkCred(r); });
+    add("I · 证书与 seccomp", [](ScanReport& r) { checkSelfExt(r); });
+    add("I · 环境与 auxv", [](ScanReport& r) { checkEnv(r); });
+    add("X · 网络与端口", [](ScanReport& r) { checkNet(r); });
+    add("X · 交叉验证", [](ScanReport& r) { checkCrossProcess(r); });
+    add("X · syscall 矛盾", [](ScanReport& r) { checkSyscallAnomaly(r); });
+    add("X · proc 自洽性", [](ScanReport& r) { checkProcAnomaly(r); });
+    add("X · 刷机痕迹与能力矩阵", [](ScanReport& r) { checkCompat(r); });
+    add("", [](ScanReport& r) { checkTiming(r); });  // 原本就无进度标签
 
-    notifyModule("E · Hook 框架");
-    checkHooks(report);
-
-    notifyModule("E · ART 与符号归属");
-    checkArtDeep(report);
-    notifyModule("E · ArtMethod 归属");
-    checkArtMethod(env, report);
-    notifyModule("E · 内联 hook 形态");
-    checkPltHooks(report);
-
-    notifyModule("E · 反调试与进程来源");
-    checkAntiDebug(report);
-
-    notifyModule("F · SELinux");
-    checkSelinux(report);
-    notifyModule("F · SELinux 行为交叉验证");
-    checkSelinuxXcheck(report);
-
-    notifyModule("F · 内核标识");
-    checkKernel(report);
-
-    notifyModule("F · 启动链");
-    checkInitChain(report);
-    notifyModule("F · 内核设备与模块");
-    checkKernelDeep(report);
-    notifyModule("F · 内核 taint");
-    checkKernelTaint(report);
-    notifyModule("F · 内核维护状态");
-    checkKernelEol(report);
-    notifyModule("F · 内核安全子系统");
-    checkKernelExt(report);
-
-    notifyModule("G · eBPF 与硬件证明");
-    checkBpf(report);
-
-    notifyModule("I · 库完整性");
-    checkIntegrity(report);
-
-    notifyModule("I · 代码段比对");
-    checkTextHash(report);
-    notifyModule("I · 进程凭据");
-    checkCred(report);
-    notifyModule("I · 证书与 seccomp");
-    checkSelfExt(report);
-
-    notifyModule("I · 环境与 auxv");
-    checkEnv(report);
-
-    notifyModule("X · 网络与端口");
-    checkNet(report);
-    notifyModule("X · 交叉验证");
-    checkCrossProcess(report);
-    notifyModule("X · syscall 矛盾");
-    checkSyscallAnomaly(report);
-    notifyModule("X · proc 自洽性");
-    checkProcAnomaly(report);
-    notifyModule("X · 刷机痕迹与能力矩阵");
-    checkCompat(report);
-    checkTiming(report);
+    const unsigned seed = (unsigned)(
+        std::chrono::steady_clock::now().time_since_epoch().count()
+        ^ (unsigned)getpid() * 2654435761u);
+    report.shuffleSeed = seed;
+    std::mt19937 rng(seed);
+    std::shuffle(steps.begin(), steps.end(), rng);
+    for (auto& step : steps) {
+        if (step.first != nullptr && step.first[0] != '\0') notifyModule(step.first);
+        step.second(report);
+    }
 
     notifyModule("Z · 汇总与方案画像");
     analyze(report);

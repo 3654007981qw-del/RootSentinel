@@ -102,4 +102,64 @@ class ScoringModelTest {
         assertEquals(1, result.hitCount)
         assertTrue("交叉奖金应保留，hookScore=${result.hookScore}", result.hookScore >= 12.0)
     }
+
+    // ---------------------------------------------------------- E1 影子评分
+
+    private fun gev(
+        id: String,
+        group: String,
+        severity: Severity = Severity.HIGH,
+    ) = Evidence(
+        id = id,
+        category = Category.ARTIFACT,
+        severity = severity,
+        confidence = Confidence.HIGH,
+        verdict = Verdict.HIT,
+        title = "t-$id",
+        sourceGroup = group,
+    )
+
+    @Test
+    fun shadowScoreDiscountsSameGroupHits() {
+        // v2.22.82 E1：同组两条 HIGH HIT（单条 20 分）正式口径合计
+        // 40；影子口径 = 最高 20 + 其余 20×0.25 = 25。覆盖率折扣
+        // 同比例作用于两个总分，比值不受影响。
+        val items = listOf(
+            gev("A.DATA_ADB", "fs:/data/adb"),
+            gev("A.MODULES_DIR", "fs:/data/adb"),
+        )
+        val result = ScoringModel.score(items, emptyList(), DeviceProfile())
+        assertTrue("正式分应 > 0", result.score > 0.0)
+        assertEquals(25.0 / 40.0, result.shadowScore / result.score, 0.01)
+        assertTrue(result.notes.any { it.contains("影子评分") })
+    }
+
+    @Test
+    fun shadowScoreEqualsOfficialForUngroupedHits() {
+        // 无组证据各自独立成组，折减公式退化为原值：影子 == 正式。
+        val items = listOf(
+            ev("A.ONE", Verdict.HIT),
+            ev("A.TWO", Verdict.HIT),
+        )
+        val result = ScoringModel.score(items, emptyList(), DeviceProfile())
+        assertEquals(result.score, result.shadowScore, 0.001)
+        assertEquals(result.grade, result.shadowGrade)
+    }
+
+    @Test
+    fun shadowScoreIgnoresGroupedPasses() {
+        // 只有 HIT 进影子桶：同组一条 HIT + 一条 PASS，
+        // 影子分应与正式分一致（PASS 本来就不计分）。
+        val items = listOf(
+            gev("A.DATA_ADB", "fs:/data/adb"),
+            Evidence(
+                id = "A.MODULES_DIR", category = Category.ARTIFACT,
+                severity = Severity.HIGH, confidence = Confidence.HIGH,
+                verdict = Verdict.PASS, title = "t",
+                sourceGroup = "fs:/data/adb",
+            ),
+        )
+        val result = ScoringModel.score(items, emptyList(), DeviceProfile())
+        assertEquals(result.score, result.shadowScore, 0.001)
+    }
 }

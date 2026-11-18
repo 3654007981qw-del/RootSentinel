@@ -120,6 +120,8 @@ object NativeReportParser {
                     } ?: emptyList(),
                     fpNote = o.optString("fpNote"),
                     verifyNote = o.optString("verifyNote"),
+                    // v2.22.82 E1：来源组（additive 字段，缺失即独立来源）
+                    sourceGroup = o.optString("sg"),
                 )
             }
 
