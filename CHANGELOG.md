@@ -3,6 +3,14 @@
 更新说明从 2.22.82 起中英双语；2.22.81 及更早的条目已一并改写。
 Release notes are bilingual (Chinese / English) from 2.22.82 on; older entries have been rewritten to match.
 
+## 2.22.84 — 2026-11-18
+
+**外壳切换改成无缝了。**
+**Shell switching is seamless now.**
+
+- 上一版给外壳切换加了滑动淡入，但再顺的动画也还是「切」：旧外壳退出、新外壳重建，中间总有一瞬不是最终画面。这一版换了做法——两套外壳同时常驻，叠在一起，切换只是把另一套显出来：不销毁、不重建，滚动位置和页面状态原样保留，点下去当场就是另一套界面，没有过渡帧、没有白屏，上一版的切换动画随之去掉。页签位置也打通了：在一套里停在「报告」，切到另一套也在「报告」，两边来回切不会被甩回首页。隐藏的那套不接触摸、不进无障碍树，返回键也归当前显示的外壳管。代价是两套界面同时活在内存里，启动和占用略涨，旗舰机上基本无感。
+  The last release animated the shell switch, but even a smooth animation is still a switch: the old shell exits, the new one rebuilds, and for a moment the screen is neither. This release takes the other route — both shells now stay composed, stacked, and switching just reveals the other one. Nothing is torn down or rebuilt, scroll positions and page state survive as-is, and the tap lands instantly on the other shell: no transition frames, no blank flash, and the .83 animation is gone. The tab position is shared too — stop on Report in one shell and you are on Report in the other, back and forth, instead of being thrown back to Home. The hidden shell takes no touches, stays out of the accessibility tree, and back presses belong to the shell on screen. The cost is both UIs living in memory at once: a slightly heavier start and footprint, unnoticeable on a flagship.
+
 ## 2.22.83 — 2026-11-18
 
 **切换界面外壳时有过渡动画了。**
