@@ -3,6 +3,16 @@
 更新说明从 2.22.82 起中英双语；2.22.81 及更早的条目已一并改写。
 Release notes are bilingual (Chinese / English) from 2.22.82 on; older entries have been rewritten to match.
 
+## 2.22.83 — 2026-11-18
+
+**切换界面外壳时有过渡动画了。**
+**Switching UI shells is animated now.**
+
+- 之前在 KernelSU 风格和 SukiSU Ultra 风格之间切换是硬切，画面直接跳变。现在切换走一段过渡：新外壳 260ms 淡入，带一点横向漂移和轻微缩放，旧外壳 180ms 淡出，两个方向镜像对称。动画只包在外壳根节点上，检测引擎、设置存储、两个外壳各自保存的页面状态都没动，切换前后停留的位置和以前一致。
+  Switching between the KernelSU style and the SukiSU Ultra style used to be a hard cut. It now runs a transition: the incoming shell fades in over 260 ms with a slight horizontal drift and scale, the outgoing shell fades out over 180 ms, mirrored in both directions. The animation only wraps the shell root — the detection engine, settings storage, and each shell's own saved page state are untouched, and you land exactly where you were.
+- 证据影子评分扩了一个同源组：F.SELINUX_ENFORCE、F.SELINUX_POLICY、F.SELINUX_FILTERED 三项的证据都读自 selinuxfs 这棵树，内核级隐藏（如 KernelSU 的 selinux_hide）伪造这棵树时可以同时喂饱三路。此前 .82 的影子评分只分了 /data/adb 与 /debug_ramdisk 两组；本版把这三项归入 `selinuxfs` 组，影子口径里同组折算，不再当三份独立证据。正式评分和评级口径不变。
+  Shadow evidence scoring gained a same-source group: F.SELINUX_ENFORCE, F.SELINUX_POLICY, and F.SELINUX_FILTERED all read their evidence from the selinuxfs tree, and a kernel-level hider forging that tree (KernelSU's selinux_hide, for one) can feed all three at once. The .82 shadow scoring only grouped /data/adb and /debug_ramdisk; these three now form a `selinuxfs` group and are discounted as one source in the shadow score instead of counting as three independent witnesses. The official score and grade are unchanged.
+
 ## 2.22.82 — 2026-11-18
 
 **联合审查修复版：服务端防重放与落库原子性、原生层 errno 口径、跨进程探针加固、证据影子评分。**
