@@ -795,41 +795,69 @@ fun RootApp(auto: String?, initialTab: Int, initialSub: String?) {
                             SubPage.NONE -> Unit
                         }
                     }
-                } else if (settings.uiSkin == "sukisu" && !com.rootsentinel.data.SkinBridge.forceKsuOnce) {
-                    // v2.22.71: SukiSU-Nova shell (vendored UI, RS pager data).
-                    SukisuShell(
-                        rsPageScale = settings.pageScale,
-                        reportState = reportState,
-                        reportActions = reportActions,
-                        historyEntries = history.entries,
-                        onClearHistory = { history.clear() },
-                    )
                 } else {
-                    MainScreen(
-                        mainPagerState = mainPagerState,
-                        pagerInterceptionMode = settings.pagerInterceptionMode,
-                        navigationBadge = badge,
-                    ) { page, bottomPad ->
-                        when (page) {
-                            0 -> if (uiMode == UiMode.Miuix) {
-                                HomePagerMiuix(homeState, homeActions, bottomPad)
-                            } else {
-                                HomePagerMaterial(homeState, homeActions, bottomPad)
-                            }
-                            1 -> if (uiMode == UiMode.Miuix) {
-                                ReportPagerMiuix(reportState, reportActions, bottomPad)
-                            } else {
-                                ReportPagerMaterial(reportState, reportActions, bottomPad)
-                            }
-                            2 -> if (uiMode == UiMode.Miuix) {
-                                HistoryPagerMiuix(history.entries, { history.clear() }, bottomPad)
-                            } else {
-                                HistoryPagerMaterial(history.entries, { history.clear() }, bottomPad)
-                            }
-                            else -> if (uiMode == UiMode.Miuix) {
-                                SettingPagerMiuix(settingsUiState, settingsActions, bottomPad, rsPrivacy, rsActions)
-                            } else {
-                                SettingPagerMaterial(settingsUiState, settingsActions, bottomPad, rsPrivacy, rsActions)
+                    // v2.22.83: shell switch gets a transition (fade + slight
+                    // horizontal drift + scale) instead of a hard swap.
+                    val sukisuActive = settings.uiSkin == "sukisu" &&
+                        !com.rootsentinel.data.SkinBridge.forceKsuOnce
+                    androidx.compose.animation.AnimatedContent(
+                        targetState = sukisuActive,
+                        transitionSpec = {
+                            (androidx.compose.animation.fadeIn(
+                                androidx.compose.animation.core.tween(260)
+                            ) + androidx.compose.animation.slideInHorizontally(
+                                androidx.compose.animation.core.tween(260)
+                            ) { w -> if (targetState) w / 8 else -w / 8 } +
+                                androidx.compose.animation.scaleIn(
+                                    androidx.compose.animation.core.tween(260),
+                                    initialScale = 0.985f
+                                )).togetherWith(
+                                androidx.compose.animation.fadeOut(
+                                    androidx.compose.animation.core.tween(180)
+                                ) + androidx.compose.animation.slideOutHorizontally(
+                                    androidx.compose.animation.core.tween(180)
+                                ) { w -> if (targetState) -w / 8 else w / 8 }
+                            )
+                        },
+                        label = "shellSwitch",
+                    ) { isSukisu ->
+                        if (isSukisu) {
+                            // v2.22.71: SukiSU-Nova shell (vendored UI, RS pager data).
+                            SukisuShell(
+                                rsPageScale = settings.pageScale,
+                                reportState = reportState,
+                                reportActions = reportActions,
+                                historyEntries = history.entries,
+                                onClearHistory = { history.clear() },
+                            )
+                        } else {
+                            MainScreen(
+                                mainPagerState = mainPagerState,
+                                pagerInterceptionMode = settings.pagerInterceptionMode,
+                                navigationBadge = badge,
+                            ) { page, bottomPad ->
+                                when (page) {
+                                    0 -> if (uiMode == UiMode.Miuix) {
+                                        HomePagerMiuix(homeState, homeActions, bottomPad)
+                                    } else {
+                                        HomePagerMaterial(homeState, homeActions, bottomPad)
+                                    }
+                                    1 -> if (uiMode == UiMode.Miuix) {
+                                        ReportPagerMiuix(reportState, reportActions, bottomPad)
+                                    } else {
+                                        ReportPagerMaterial(reportState, reportActions, bottomPad)
+                                    }
+                                    2 -> if (uiMode == UiMode.Miuix) {
+                                        HistoryPagerMiuix(history.entries, { history.clear() }, bottomPad)
+                                    } else {
+                                        HistoryPagerMaterial(history.entries, { history.clear() }, bottomPad)
+                                    }
+                                    else -> if (uiMode == UiMode.Miuix) {
+                                        SettingPagerMiuix(settingsUiState, settingsActions, bottomPad, rsPrivacy, rsActions)
+                                    } else {
+                                        SettingPagerMaterial(settingsUiState, settingsActions, bottomPad, rsPrivacy, rsActions)
+                                    }
+                                }
                             }
                         }
                     }
