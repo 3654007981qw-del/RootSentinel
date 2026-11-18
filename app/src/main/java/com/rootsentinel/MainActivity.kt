@@ -906,7 +906,6 @@ fun RootApp(auto: String?, initialTab: Int, initialSub: String?) {
  * 照 KSU MainScreen 的骨架：HorizontalPager + 液态玻璃背板 +
  * FloatingBottomBar / SideRail 双形态。
  */
-@Composable
 /**
  * v2.22.84: one layer of the seamless shell stack. The active shell is
  * raised above the inactive one; the inactive shell stays composed (so
@@ -932,6 +931,7 @@ private fun Modifier.shellLayer(active: Boolean): Modifier {
     return result
 }
 
+@Composable
 private fun MainScreen(
     mainPagerState: MainPagerState,
     pagerInterceptionMode: Int,
