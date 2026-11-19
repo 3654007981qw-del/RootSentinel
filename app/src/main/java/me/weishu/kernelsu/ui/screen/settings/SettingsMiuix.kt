@@ -20,6 +20,7 @@ import androidx.compose.material.icons.rounded.Adb
 import androidx.compose.material.icons.rounded.AdminPanelSettings
 import androidx.compose.material.icons.rounded.BugReport
 import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Fingerprint
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.DeveloperMode
 import androidx.compose.material.icons.rounded.DisplaySettings
@@ -603,6 +604,19 @@ fun SettingPagerMiuix(
                                 )
                             },
                             onClick = rsActions.onSwitchToManager
+                        )
+                        ArrowPreference(
+                            title = "重置设备身份",
+                            summary = rsPrivacy.identitySummary + "；重置后以新身份登记，旧上报不再关联",
+                            startAction = {
+                                Icon(
+                                    Icons.Rounded.Fingerprint,
+                                    modifier = Modifier.padding(end = 6.dp),
+                                    contentDescription = "重置设备身份",
+                                    tint = colorScheme.onBackground
+                                )
+                            },
+                            onClick = rsActions.onResetIdentity
                         )
                     }
 

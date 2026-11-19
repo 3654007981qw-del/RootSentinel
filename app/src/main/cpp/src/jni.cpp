@@ -10,6 +10,9 @@
 #include <atomic>
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
+#include <cstring>
+#include <fcntl.h>
 #include <functional>
 #include <mutex>
 #include <random>
@@ -354,22 +357,202 @@ Java_com_rootsentinel_NativeBridge_nativeScan(JNIEnv* env, jobject /*thiz*/,
     return env->NewStringUTF(json.c_str());
 }
 
+// ---------------------------------------------------------- SHA-256（自带实现）
+// sigCheck 的 native 通道要对证书 DER 算摘要；工程内没有现成
+// 的 SHA-256，这里放一份标准实现（FIPS 180-4），只供本文件用。
+namespace {
+struct Sha256 {
+    uint32_t h[8];
+    uint64_t len;
+    uint8_t buf[64];
+    size_t buflen;
+    static uint32_t rotr(uint32_t x, int n) { return (x >> n) | (x << (32 - n)); }
+    void init() {
+        static const uint32_t H0[8] = {0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+                                       0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
+        memcpy(h, H0, sizeof(H0));
+        len = 0;
+        buflen = 0;
+    }
+    void block(const uint8_t* p) {
+        static const uint32_t K[64] = {
+            0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+            0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+            0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+            0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+            0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+            0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+            0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+            0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2};
+        uint32_t w[64];
+        for (int i = 0; i < 16; i++)
+            w[i] = (uint32_t(p[i * 4]) << 24) | (uint32_t(p[i * 4 + 1]) << 16) |
+                   (uint32_t(p[i * 4 + 2]) << 8) | uint32_t(p[i * 4 + 3]);
+        for (int i = 16; i < 64; i++) {
+            uint32_t s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >> 3);
+            uint32_t s1 = rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ (w[i - 2] >> 10);
+            w[i] = w[i - 16] + s0 + w[i - 7] + s1;
+        }
+        uint32_t a = h[0], b = h[1], c = h[2], d = h[3], e = h[4], f = h[5], g = h[6], hh = h[7];
+        for (int i = 0; i < 64; i++) {
+            uint32_t S1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
+            uint32_t ch = (e & f) ^ (~e & g);
+            uint32_t t1 = hh + S1 + ch + K[i] + w[i];
+            uint32_t S0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
+            uint32_t mj = (a & b) ^ (a & c) ^ (b & c);
+            uint32_t t2 = S0 + mj;
+            hh = g; g = f; f = e; e = d + t1; d = c; c = b; b = a; a = t1 + t2;
+        }
+        h[0] += a; h[1] += b; h[2] += c; h[3] += d; h[4] += e; h[5] += f; h[6] += g; h[7] += hh;
+    }
+    void update(const uint8_t* p, size_t n) {
+        len += n;
+        while (n > 0) {
+            size_t take = 64 - buflen;
+            if (take > n) take = n;
+            memcpy(buf + buflen, p, take);
+            buflen += take;
+            p += take;
+            n -= take;
+            if (buflen == 64) {
+                block(buf);
+                buflen = 0;
+            }
+        }
+    }
+    void final(uint8_t out[32]) {
+        uint64_t bits = len * 8;
+        uint8_t pad = 0x80;
+        update(&pad, 1);
+        uint8_t zero = 0;
+        while (buflen != 56) update(&zero, 1);
+        uint8_t lb[8];
+        for (int i = 0; i < 8; i++) lb[i] = uint8_t(bits >> (56 - 8 * i));
+        // 直接喂最后 8 字节（不再计入 len 语义，已封口）
+        memcpy(buf + buflen, lb, 8);
+        block(buf);
+        for (int i = 0; i < 8; i++) {
+            out[i * 4] = uint8_t(h[i] >> 24);
+            out[i * 4 + 1] = uint8_t(h[i] >> 16);
+            out[i * 4 + 2] = uint8_t(h[i] >> 8);
+            out[i * 4 + 3] = uint8_t(h[i]);
+        }
+    }
+};
+
+std::string sha256Hex(const uint8_t* p, size_t n) {
+    Sha256 s;
+    s.init();
+    s.update(p, n);
+    uint8_t out[32];
+    s.final(out);
+    static const char* HEX = "0123456789abcdef";
+    std::string r;
+    r.reserve(64);
+    for (int i = 0; i < 32; i++) {
+        r += HEX[out[i] >> 4];
+        r += HEX[out[i] & 15];
+    }
+    return r;
+}
+
+// ---------------------------------------------------------- APK Signing Block 解析
+// native 通道：不经 PackageManager，直接读自己 APK 文件的
+// Signing Block（v2），取第一个签名者的第一张证书算 SHA-256。
+// PM 通道（Java 侧）可能被 Hook 喂假摘要；文件字节通道与之
+// 独立，两边对不上本身就是篡改信号。任何解析失败都返回空串
+//（= 通道未知），绝不因解析问题误报不符。
+uint32_t rd32(const uint8_t* p) {
+    return uint32_t(p[0]) | (uint32_t(p[1]) << 8) | (uint32_t(p[2]) << 16) | (uint32_t(p[3]) << 24);
+}
+uint64_t rd64(const uint8_t* p) {
+    return uint64_t(rd32(p)) | (uint64_t(rd32(p + 4)) << 32);
+}
+
+std::string apkSignerCertSha256(const std::string& path) {
+    int fd = open(path.c_str(), O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return "";
+    struct FdGuard { int fd; ~FdGuard() { close(fd); } } guard{fd};
+    off_t size = lseek(fd, 0, SEEK_END);
+    if (size < 64) return "";
+    // EOCD：从文件尾向前找 0x06054b50（注释最长 65535）。
+    const off_t tailLen = size < 65557 ? size : 65557;
+    std::vector<uint8_t> tail((size_t)tailLen);
+    if (lseek(fd, size - tailLen, SEEK_SET) < 0) return "";
+    if (read(fd, tail.data(), tail.size()) != (ssize_t)tail.size()) return "";
+    off_t eocd = -1;
+    for (off_t i = tailLen - 22; i >= 0; i--) {
+        if (rd32(tail.data() + i) == 0x06054b50u) { eocd = i; break; }
+    }
+    if (eocd < 0) return "";
+    uint32_t cdOff = rd32(tail.data() + eocd + 16);
+    if (cdOff < 24 || (off_t)cdOff > size) return "";
+    // Signing Block 尾：[size:8]["APK Sig Block 42":16] 紧贴 CD 之前。
+    uint8_t foot[24];
+    if (lseek(fd, (off_t)cdOff - 24, SEEK_SET) < 0) return "";
+    if (read(fd, foot, 24) != 24) return "";
+    if (memcmp(foot + 8, "APK Sig Block 42", 16) != 0) return "";
+    uint64_t blockSize = rd64(foot);
+    if (blockSize < 24 || blockSize > (64ull << 20) || (off_t)(blockSize + 8) > (off_t)cdOff) return "";
+    off_t blockStart = (off_t)cdOff - (off_t)blockSize - 8;
+    std::vector<uint8_t> blk((size_t)blockSize + 8);
+    if (lseek(fd, blockStart, SEEK_SET) < 0) return "";
+    if (read(fd, blk.data(), blk.size()) != (ssize_t)blk.size()) return "";
+    if (rd64(blk.data()) != blockSize) return "";
+    // 遍历 ID-value 对，找 v2（0x7109871a）。
+    const uint8_t* p = blk.data() + 8;
+    const uint8_t* end = blk.data() + blk.size() - 24;
+    const uint8_t* v2 = nullptr;
+    size_t v2len = 0;
+    while (p + 8 <= end) {
+        uint64_t len = rd64(p);
+        if (len < 4 || p + 8 + len > end) break;
+        uint32_t id = rd32(p + 8);
+        if (id == 0x7109871au) {
+            v2 = p + 12;
+            v2len = (size_t)len - 4;
+            break;
+        }
+        p += 8 + len;
+    }
+    if (!v2) return "";
+    // v2 值：[signersLen:4][signerLen:4][signedDataLen:4][signedData...]
+    // signedData：[digestsLen:4][digests][certsLen:4][certLen:4][cert DER]
+    auto need = [&](const uint8_t* q, size_t n) { return q + n <= v2 + v2len; };
+    if (!need(v2, 12)) return "";
+    const uint8_t* sd = v2 + 12;
+    if (!need(sd, 4)) return "";
+    uint32_t digLen = rd32(sd);
+    const uint8_t* certs = sd + 4 + digLen;
+    if (!need(sd + 4, digLen) || !need(certs, 8)) return "";
+    uint32_t certLen = rd32(certs + 4);
+    const uint8_t* cert = certs + 8;
+    if (certLen == 0 || !need(cert, certLen)) return "";
+    return sha256Hex(cert, certLen);
+}
+}  // namespace
+
 extern "C" JNIEXPORT jint JNICALL
-Java_com_rootsentinel_NativeBridge_sigCheck(JNIEnv* env, jobject /*thiz*/, jstring hexSha256) {
+Java_com_rootsentinel_NativeBridge_sigCheck(JNIEnv* env, jobject /*thiz*/, jstring hexSha256, jstring apkPath) {
     // ---------------------------------------------------------------- 签名基线比对
     // Java 侧算出签名证书的 SHA-256（hex），这里与编译进 .so 的期望值比对。
     // 基线用 RSs() 做编译期混淆，字符串表里查不到明文；
     // 想绕过就必须同时改 .so，而不是改 dex 里的一行常量。
     //
-    // 返回值：1 = 匹配　0 = 不匹配　-1 = 无法判断
-    if (hexSha256 == nullptr) return -1;
+    // 返回值（v2.23.0 起改为双通道打包，Kotlin 侧解码）：
+    //   bits 0-1 = Java 通道（经 PackageManager 拿到的摘要与基线比对）
+    //   bits 2-3 = native 通道（直接解析 APK Signing Block 的证书摘要）
+    //   每通道编码：0 = 无法判断　1 = 匹配　2 = 不匹配
+    // 旧返回值（1/0/-1）与新编码在「双通道都未知」时恰好都归到
+    // Kotlin 侧的未知分支，调用方已按新编码重写，不再兼容旧值。
+    if (hexSha256 == nullptr) return 0;
 
     const char* s = env->GetStringUTFChars(hexSha256, nullptr);
-    if (s == nullptr) return -1;
+    if (s == nullptr) return 0;
     std::string got(s);
     env->ReleaseStringUTFChars(hexSha256, s);
 
-    if (got.size() != 64) return -1;
+    if (got.size() != 64) return 0;
 
     // ---------------------------------------------------------------- 签名基线
     //
@@ -388,12 +571,12 @@ Java_com_rootsentinel_NativeBridge_sigCheck(JNIEnv* env, jobject /*thiz*/, jstri
     //   · 拿不到证书（未配置签名）时不定义该宏 → 返回 -1（未知）
     //     调用方据此报 UNKNOWN，而不是 HIT
 #ifndef RS_SIGNER_SHA256
-    // 没有注入基线：无法判定，不能报「不符」
+    // 没有注入基线：双通道都无法判定，不能报「不符」
     (void)got;
-    return -1;
+    return 0;
 #else
     static const std::string expected = RSs(RS_SIGNER_SHA256);
-    if (expected.size() != 64) return -1;   // 注入值异常，按未知处理
+    if (expected.size() != 64) return 0;   // 注入值异常，按未知处理
     // v2.22.41：大小写归一化后再比较。
     // 历史教训：Java 侧传来的 got 是小写 hex（IntegrityChecker 用 %02x
     // 格式化），而 Gradle 注入的基线是大写 hex（keytool 输出转大写），
@@ -408,7 +591,22 @@ Java_com_rootsentinel_NativeBridge_sigCheck(JNIEnv* env, jobject /*thiz*/, jstri
         }
         return true;
     };
-    return hexEq(got, expected) ? 1 : 0;
+    // Java 通道：调用方经 PackageManager 算出的摘要。
+    jint javaCh = hexEq(got, expected) ? 1 : 2;
+    // native 通道：自己解析 APK 文件 Signing Block 里的证书。
+    // 与 Java 通道的数据源完全独立（文件字节 vs 系统服务），
+    // 任一通道报「不匹配」都成立；通道读不到时记未知。
+    jint nativeCh = 0;
+    if (apkPath != nullptr) {
+        const char* ps = env->GetStringUTFChars(apkPath, nullptr);
+        if (ps != nullptr) {
+            std::string path(ps);
+            env->ReleaseStringUTFChars(apkPath, ps);
+            std::string certHex = apkSignerCertSha256(path);
+            if (!certHex.empty()) nativeCh = hexEq(certHex, expected) ? 1 : 2;
+        }
+    }
+    return javaCh | (nativeCh << 2);
 #endif
 }
 

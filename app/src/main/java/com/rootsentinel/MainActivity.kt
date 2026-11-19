@@ -332,7 +332,7 @@ fun RootApp(auto: String?, initialTab: Int, initialSub: String?) {
                     }
                     // 诊断摘要上传：声明已确认 + 开关开启才传（v2.22.46 起的约定）
                     if (settings.declarationSeen && settings.telemetryEnabled) {
-                        scope.launch(Dispatchers.IO) { Telemetry.upload(r) }
+                        scope.launch(Dispatchers.IO) { Telemetry.upload(ctx, r) }
                     }
                     if (settings.autoExport) {
                         scope.launch(Dispatchers.IO) {
@@ -353,6 +353,13 @@ fun RootApp(auto: String?, initialTab: Int, initialSub: String?) {
     LaunchedEffect(settings.declarationSeen, settings.checkUpdate) {
         if (settings.declarationSeen && settings.checkUpdate) {
             updateController.checkAuto(scope)
+        }
+    }
+    // 签名策略刷新（v2.23.0）：与更新检查同门（声明已确认），
+    // 拉取失败静默沿用缓存；策略只影响提示与评分口径，不锁功能。
+    LaunchedEffect(settings.declarationSeen) {
+        if (settings.declarationSeen) {
+            scope.launch(Dispatchers.IO) { com.rootsentinel.util.Policy.refresh(ctx) }
         }
     }
     // DEBUG 自动化入口：auto=scan 直接开扫
@@ -636,6 +643,11 @@ fun RootApp(auto: String?, initialTab: Int, initialSub: String?) {
             }
         }
     }
+    // v2.23.0：设备身份摘要（重置后靠 epoch 触发重组刷新）
+    var identityEpoch by remember { mutableStateOf(0) }
+    val identitySummary = remember(identityEpoch) {
+        com.rootsentinel.util.Identity.statusSummary(ctx) ?: "未生成（首次上报时自动生成）"
+    }
     val rsPrivacy = RsPrivacyState(
         telemetryEnabled = settings.telemetryEnabled,
         crashUploadEnabled = settings.crashUploadEnabled,
@@ -643,6 +655,7 @@ fun RootApp(auto: String?, initialTab: Int, initialSub: String?) {
         keepHistory = settings.keepHistory,
         uiSkin = settings.uiSkin,
         hasCustomBg = settings.homeBgPath.isNotEmpty(),
+        identitySummary = identitySummary,
     )
     val rsActions = RsSettingsActions(
         onSetTelemetryEnabled = { settings.telemetryEnabled = it },
@@ -664,6 +677,13 @@ fun RootApp(auto: String?, initialTab: Int, initialSub: String?) {
         onResetHomeBg = {
             runCatching { java.io.File(settings.homeBgPath).delete() }
             settings.homeBgPath = ""
+        },
+        onResetIdentity = {
+            scope.launch(Dispatchers.IO) {
+                com.rootsentinel.util.Identity.reset()
+                com.rootsentinel.util.Identity.ensureKey()
+                identityEpoch++
+            }
         },
     )
     val paletteState = ColorPaletteUiState(

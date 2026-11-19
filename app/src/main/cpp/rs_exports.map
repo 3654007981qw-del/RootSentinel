@@ -1,0 +1,8 @@
+{
+  global:
+    JNI_OnLoad;
+    Java_com_rootsentinel_NativeBridge_nativeScan;
+    Java_com_rootsentinel_NativeBridge_sigCheck;
+  local:
+    *;
+};

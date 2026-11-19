@@ -19,16 +19,24 @@ NDK=$SDK/ndk/27.2.12479018
 JAVAC=/usr/lib/jvm/java-21-openjdk-amd64/bin/javac
 JAVA=/usr/lib/jvm/java-21-openjdk-amd64/bin/java
 APPID=com.rootsentinel
-VCODE=22286
-VNAME=2.22.86
+VCODE=22300
+VNAME=2.23.0
 # 本次构建的签名身份：rsbuild 的 rs.jks（AURORA 侧密钥）。
 # native 基线注入同一证书指纹，保证 I.APK_SIGNATURE 自洽。
 SIGNER_SHA=06377C87CB33D9AB1B0BAE330135AB67404AB96DEEA9F3584DDF2B2FFCDC7A06
-KS=$HOME/workspace/rsbuild/rs.jks
+KS=$HOME/.rs-signing/rs.jks
 KSPASS=$HOME/workspace/rsbuild/.kspass
 mkdir -p "$WORK"/{aar,jars,resz,gen,proguard}
 
 stage_prep() {
+  # v2.23.0（安全架构阶段三·供应链）：deps 依赖哈希清单校验。
+  # 清单由构建机维护在 $DEPS 的同级目录（deps2-manifest.sha256），
+  # 任一依赖文件被替换/损坏都会让构建 fail-closed；清单不存在
+  # 时跳过（CI 的 Gradle 路线不走本管线）。
+  if [ -f "$DEPS/../deps2-manifest.sha256" ]; then
+    (cd "$DEPS" && sha256sum -c "$DEPS/../deps2-manifest.sha256" >/dev/null 2>&1) || { echo "DEPS HASH FAIL: dependency manifest mismatch"; return 1; }
+    echo "deps manifest OK"
+  fi
   # 【版本单一事实源】Version.kt 的 NAME/CODE 与 CMakeLists 的
   # RS_VERSION 都由本脚本的 VNAME/VCODE 在此生成，不许手改。
   # 教训（2.22.47/48）：两处手写常量停在 2.22.46 没跟上，导致
@@ -302,7 +310,7 @@ stage_gate() {
   unzip -o -q "$apk" 'classes*.dex' 'lib/*/librootsentinel.so' -d "$tmp" || { echo "GATE FAIL: unzip"; rm -rf "$tmp"; return 1; }
   [ -f "$tmp/classes.dex" ] || { echo "GATE FAIL: no classes.dex in apk"; rm -rf "$tmp"; return 1; }
   local stale
-  stale=$(cat "$tmp"/classes*.dex | strings | grep -oE '2\.22\.[0-9]+' | sort -u | grep -vx "$VNAME" || true)
+  stale=$(cat "$tmp"/classes*.dex | strings | grep -oE '2\.2[0-9]\.[0-9]+' | sort -u | grep -vx "$VNAME" || true)
   [ -z "$stale" ] || { echo "GATE FAIL: stale version strings in dex: $stale"; rm -rf "$tmp"; return 1; }
   # v2.22.53（第八轮审查 P2-04）：三 ABI 必须齐全且 ELF 机器类型
   # 对得上。此前只查两个 64 位 ABI 的版本串，armeabi-v7a 缺失或
@@ -322,11 +330,16 @@ stage_gate() {
   done
   local vs
   for abi in arm64-v8a x86_64; do
-    vs=$(strings "$tmp/lib/$abi/librootsentinel.so" | grep -oE '2\.22\.[0-9]+' | sort -u)
+    vs=$(strings "$tmp/lib/$abi/librootsentinel.so" | grep -oE '2\.2[0-9]\.[0-9]+' | sort -u)
     [ "$vs" = "$VNAME" ] || { echo "GATE FAIL: $abi .so version strings: $vs"; rm -rf "$tmp"; return 1; }
   done
+  # v2.23.0（安全架构阶段四）：导出符号收敛硬门——arm64 .so
+  # 已定义动态符号只许剩 JNI 入口量级（实测基线 3，阈值 10）。
+  local nsym
+  nsym=$("$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm" -D --defined-only "$tmp/lib/arm64-v8a/librootsentinel.so" 2>/dev/null | wc -l)
+  [ "$nsym" -le 10 ] || { echo "GATE FAIL: arm64 .so exports $nsym dynamic symbols (>10)"; rm -rf "$tmp"; return 1; }
   rm -rf "$tmp"
-  echo "GATE OK: badging/signature+cert/dex/3-ABI .so all at $VNAME"
+  echo "GATE OK: badging/signature+cert/dex/3-ABI .so/symbols($nsym) all at $VNAME"
 }
 
 stage_verify() {

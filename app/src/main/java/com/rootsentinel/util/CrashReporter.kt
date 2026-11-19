@@ -172,7 +172,9 @@ object CrashReporter {
                 f.delete()
                 return
             }
-            val body = ReportCrypto.seal(plain).toByteArray(Charsets.UTF_8)
+            // v2.23.0：与诊断摘要同一封包入口（v3 优先、v2 回退）。
+            val sealed = Uplink.seal(plain) ?: throw IllegalStateException("seal failed")
+            val body = sealed.toByteArray(Charsets.UTF_8)
             val conn = URL(Telemetry.UPLOAD_ENDPOINT + "/crash").openConnection() as HttpURLConnection
             try {
                 conn.requestMethod = "POST"

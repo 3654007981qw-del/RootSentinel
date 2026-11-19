@@ -203,11 +203,16 @@ data class ScoreResult(
     /** 硬件证明确认启动链不可信（TEE 签名，无法伪造） */
     val integrityBreach: Boolean = false,
     val envRisk: Boolean = false,
-    // ---- v2.22.82 E1 影子评分（同源证据折减试算，未生效） ----
-    /** 影子总分：与 score 同口径，但同 sourceGroup 的 HIT 先做组内折减 */
+    // ---- v2.22.82 E1 影子评分 → v2.23.0 正式转正 ----
+    /** 同源折减口径总分（grouped 模式下即正式分；legacy 模式下为试算值） */
     val shadowScore: Double = score,
-    /** 影子等级：用影子总分走同一套阈值与完整性门槛得到的等级 */
+    /** 同源折减口径等级（grouped 模式下即正式等级） */
     val shadowGrade: Grade = grade,
+    // ---- v2.23.0 双轨过渡：未折减口径（旧口径）结果并行保留一版 ----
+    /** 未折减总分（v2.22.x 的正式口径），供服务端比对评级漂移 */
+    val legacyScore: Double = score,
+    /** 未折减等级（v2.22.x 的正式口径） */
+    val legacyGrade: Grade = grade,
 )
 
 /**
@@ -483,12 +488,17 @@ object ScoringModel {
 
     /**
      * @param expectedMin 期望的检测项下限。传 null 表示按 [dynamicExpectedMin] 自动推算。
+     * @param grouped v2.23.0：true（默认）= 同源证据折减口径为正式
+     * 口径；false = 未折减的旧口径为正式口径（服务端策略
+     * scoreMode=legacy 的远程回退）。两种口径的结果都会算出，
+     * 未生效的一侧分别落在 shadow / legacy 字段里供比对。
      */
     fun score(
         items: List<Evidence>,
         crosses: List<CrossCheck>,
         profile: DeviceProfile,
         expectedMin: Int? = null,
+        grouped: Boolean = true,
     ): ScoreResult {
         val notes = mutableListOf<String>()
 
@@ -796,13 +806,25 @@ object ScoringModel {
                 it.confidence == Confidence.VERIFIED
         }
 
-        val grade = when {
+        // v2.23.0（E1 转正）：正式口径在两套总分之间选择——
+        // grouped（默认）用同源折减后的影子总分与各维度分；
+        // legacy（策略 scoreMode=legacy）用未折减的旧口径。
+        // 两套口径的等级都保留：正式等级进 grade，未折减等级
+        // 进 legacyGrade，折减等级进 shadowGrade，供比对漂移。
+        val selHard = if (grouped) shadowHard else hard
+        val selSoft = if (grouped) shadowSoft else soft
+        val selTotal = if (grouped) shadowTotal else total
+        val selIntegrity = if (grouped) shadowIntegrity else integrityScore
+        val selHook = if (grouped) shadowHook else hookScore
+        val selEnv = if (grouped) shadowEnv else envScore
+
+        fun gradeFor(t: Double): Grade = when {
             // ① 已经抓到足够多 root 证据 → 直接下结论，
             //    哪怕同时有阶段失败也不影响（证据本身是有效的）。
-            total >= 85.0 -> Grade.ROOTED_HIDING
-            hasHiding && total >= 40.0 -> Grade.ROOTED_HIDING
-            total >= 40.0 -> Grade.ROOTED
-            total >= 10.0 -> Grade.SUSPICIOUS
+            t >= 85.0 -> Grade.ROOTED_HIDING
+            hasHiding && t >= 40.0 -> Grade.ROOTED_HIDING
+            t >= 40.0 -> Grade.ROOTED
+            t >= 10.0 -> Grade.SUSPICIOUS
 
             // ② 没有足够证据说「有问题」。这时候任何检测面缺失
             //    都不能翻译成「没问题」—— 一律 INCOMPLETE。
@@ -817,35 +839,32 @@ object ScoringModel {
             else -> Grade.CLEAN
         }
 
-        // E1 影子等级：同一套阈值与完整性门槛，只换总分。
-        val shadowGrade = when {
-            shadowTotal >= 85.0 -> Grade.ROOTED_HIDING
-            hasHiding && shadowTotal >= 40.0 -> Grade.ROOTED_HIDING
-            shadowTotal >= 40.0 -> Grade.ROOTED
-            shadowTotal >= 10.0 -> Grade.SUSPICIOUS
-            nativeFailed || stageFailed > 0 || errored > 0 || tooFew || cancelledScan ||
-                versionMismatch || protocolBroken ||
-                (items.isEmpty() && crosses.isEmpty()) -> Grade.INCOMPLETE
-            coverage < 0.6 -> Grade.INCOMPLETE
-            else -> Grade.CLEAN
-        }
+        val grade = gradeFor(selTotal)
+        val legacyGrade = gradeFor(total)
+        val shadowGrade = gradeFor(shadowTotal)
         if (kotlin.math.abs(shadowTotal - total) > 0.001) {
-            notes += "影子评分（同源证据折减试算，未生效）：影子 " +
-                String.format("%.1f", shadowTotal) + " 分 / ${shadowGrade.name}，" +
-                "正式 " + String.format("%.1f", total) + " 分 / ${grade.name}"
+            notes += if (grouped) {
+                "同源证据折减已生效：正式 " +
+                    String.format("%.1f", selTotal) + " 分 / ${grade.name}（未折减 " +
+                    String.format("%.1f", total) + " 分 / ${legacyGrade.name}）"
+            } else {
+                "策略指定未折减口径：正式 " +
+                    String.format("%.1f", total) + " 分 / ${legacyGrade.name}（同源折减试算 " +
+                    String.format("%.1f", shadowTotal) + " 分 / ${shadowGrade.name}）"
+            }
         }
 
-        if (integrityScore > 0.0) {
-            notes += "系统完整性维度 ${String.format("%.1f", integrityScore)} 分" +
+        if (selIntegrity > 0.0) {
+            notes += "系统完整性维度 ${String.format("%.1f", selIntegrity)} 分" +
                 (if (integrityBreach) "（TEE 证明确认启动链不可信）" else "") +
                 " —— 独立维度，不计入 Root 判定"
         }
-        if (hookScore > 0.0) {
-            notes += "Hook 维度 ${String.format("%.1f", hookScore)} 分 " +
+        if (selHook > 0.0) {
+            notes += "Hook 维度 ${String.format("%.1f", selHook)} 分 " +
                 "（注入/内联 hook/运行时篡改）—— 独立维度，不计入 Root 判定"
         }
-        if (envScore > 0.0) {
-            notes += "运行环境维度 ${String.format("%.1f", envScore)} 分 " +
+        if (selEnv > 0.0) {
+            notes += "运行环境维度 ${String.format("%.1f", selEnv)} 分 " +
                 "（调试/管理器/配置类）—— 独立维度，不计入 Root 判定"
         }
 
@@ -867,22 +886,24 @@ object ScoringModel {
 
         return ScoreResult(
             grade = grade,
-            score = total,
-            hardScore = hard,
-            softScore = soft,
+            score = selTotal,
+            hardScore = selHard,
+            softScore = selSoft,
             confidence = conf,
             hitCount = hit,
             unknownCount = unknown,
             coverage = coverage,
             notes = notes,
-            rootScore = total,
-            hookScore = hookScore,
-            integrityScore = integrityScore,
-            environmentScore = envScore,
+            rootScore = selTotal,
+            hookScore = selHook,
+            integrityScore = selIntegrity,
+            environmentScore = selEnv,
             integrityBreach = integrityBreach,
-            envRisk = envScore >= 10.0,
+            envRisk = selEnv >= 10.0,
             shadowScore = shadowTotal,
             shadowGrade = shadowGrade,
+            legacyScore = total,
+            legacyGrade = legacyGrade,
         )
     }
 }

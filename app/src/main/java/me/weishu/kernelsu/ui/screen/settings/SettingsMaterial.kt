@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.Adb
 import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.DeveloperMode
 import androidx.compose.material.icons.filled.DisplaySettings
@@ -453,6 +454,15 @@ fun SettingPagerMaterial(
                             headlineContent = { Text("切换到管理器") },
                             supportingContent = { Text("打开 vivo 版 KernelSU 管理器，未装时自动安装内置副本") },
                             leadingContent = { Icon(Icons.Filled.AdminPanelSettings, "切换到管理器") },
+                            trailingContent = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null) }
+                        )
+                    },
+                    {
+                        SegmentedListItem(
+                            onClick = rsActions.onResetIdentity,
+                            headlineContent = { Text("重置设备身份") },
+                            supportingContent = { Text(rsPrivacy.identitySummary + "；重置后以新身份登记，旧上报不再关联") },
+                            leadingContent = { Icon(Icons.Filled.Fingerprint, "重置设备身份") },
                             trailingContent = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null) }
                         )
                     }

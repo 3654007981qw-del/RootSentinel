@@ -204,6 +204,9 @@ object JsonExporter {
         // v2.22.82 E1：影子评分（同源折减试算，未生效）
         score.put("shadowScore", result.score.shadowScore)
         score.put("shadowGrade", result.score.shadowGrade.name)
+        // v2.23.0 双轨过渡：未折减口径（旧正式口径）一并导出供比对
+        score.put("legacyScore", result.score.legacyScore)
+        score.put("legacyGrade", result.score.legacyGrade.name)
         val notes = org.json.JSONArray()
         result.score.notes.forEach { notes.put(it) }
         score.put("notes", notes)

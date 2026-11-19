@@ -440,7 +440,12 @@ class DetectorEngine(private val context: Context) {
         // ★ crosses 必须传进去：
         //   之前固定传 emptyList()，导致 CROSSCHECK_BONUS 在真实路径里从未生效，
         //   native 输出的跨视角矛盾被整体丢弃。
-        val score = ScoringModel.score(items, nativeCrosses, profile)
+        // v2.23.0：评分口径受签名策略控制（grouped 默认；
+        // scoreMode=legacy 时远程回退到未折减口径）。
+        val score = ScoringModel.score(
+            items, nativeCrosses, profile,
+            grouped = com.rootsentinel.util.Policy.current(context).scoreMode != "legacy",
+        )
 
         return Result(
             items = items,

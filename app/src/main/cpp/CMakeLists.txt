@@ -72,8 +72,21 @@ target_compile_options(rootsentinel PRIVATE
         -Wextra
         -Wno-unused-parameter
         -fvisibility=hidden
+        -fvisibility-inlines-hidden
         -fstack-protector-strong
         -fno-asynchronous-unwind-tables
+)
+
+# 导出符号收敛（v2.23.0，安全架构阶段四）：此前只有
+# -fvisibility=hidden，挡不住静态链接的 libc++ 符号被整表
+# 再导出——发布 .so 实测有 2016 个动态符号（1982 个 C++
+# mangled），等于把内部结构图随包发布。现在双保险：
+# --exclude-libs,ALL 不再导出任何归档库符号，版本脚本把
+# 全局符号钉死为 3 个 JNI 入口。发布门（build_apk.sh
+# stage_gate）另有符号数 ≤10 的硬校验。
+target_link_options(rootsentinel PRIVATE
+        "-Wl,--exclude-libs,ALL"
+        "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/rs_exports.map"
 )
 
 # 强制内联汇编走独立编译单元，防止 LTO 把 syscall 包装“优化”成 libc 调用
@@ -94,7 +107,7 @@ else()
 endif()
 
 target_compile_definitions(rootsentinel PRIVATE
-        RS_VERSION="2.22.86"
+        RS_VERSION="2.23.0"
 )
 
 # 签名基线（v2.22.41 修复）：构建方通过 -DRS_SIGNER_SHA256=<64 位 hex>

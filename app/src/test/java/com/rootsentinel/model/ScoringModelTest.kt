@@ -121,17 +121,36 @@ class ScoringModelTest {
 
     @Test
     fun shadowScoreDiscountsSameGroupHits() {
-        // v2.22.82 E1：同组两条 HIGH HIT（单条 20 分）正式口径合计
-        // 40；影子口径 = 最高 20 + 其余 20×0.25 = 25。覆盖率折扣
-        // 同比例作用于两个总分，比值不受影响。
+        // v2.22.82 E1 影子口径 → v2.23.0 转正：同组两条 HIGH HIT
+        // （单条 20 分）未折减合计 40；折减 = 最高 20 + 其余
+        // 20×0.25 = 25。grouped（默认）下正式分即折减分，
+        // legacyScore 保留未折减的 40。覆盖率折扣同比例作用于
+        // 两个总分，比值不受影响。
         val items = listOf(
             gev("A.DATA_ADB", "fs:/data/adb"),
             gev("A.MODULES_DIR", "fs:/data/adb"),
         )
         val result = ScoringModel.score(items, emptyList(), DeviceProfile())
         assertTrue("正式分应 > 0", result.score > 0.0)
+        assertEquals(25.0 / 40.0, result.score / result.legacyScore, 0.01)
+        assertEquals(result.score, result.shadowScore, 0.001)
+        assertEquals(result.grade, result.shadowGrade)
+        assertTrue(result.notes.any { it.contains("同源证据折减已生效") })
+    }
+
+    @Test
+    fun legacyModeKeepsUndiscountedOfficialScore() {
+        // v2.23.0：策略 scoreMode=legacy 时正式口径回到未折减，
+        // 折减结果仍在 shadow 字段里可比对。
+        val items = listOf(
+            gev("A.DATA_ADB", "fs:/data/adb"),
+            gev("A.MODULES_DIR", "fs:/data/adb"),
+        )
+        val result = ScoringModel.score(items, emptyList(), DeviceProfile(), grouped = false)
+        assertEquals(result.score, result.legacyScore, 0.001)
+        assertEquals(result.grade, result.legacyGrade)
         assertEquals(25.0 / 40.0, result.shadowScore / result.score, 0.01)
-        assertTrue(result.notes.any { it.contains("影子评分") })
+        assertTrue(result.notes.any { it.contains("未折减口径") })
     }
 
     @Test
@@ -149,19 +168,21 @@ class ScoringModelTest {
     @Test
     fun shadowScoreDiscountsSelinuxfsGroupOnly() {
         // v2.22.83：selinuxfs 组内两条 HIGH HIT 折减（20 + 20×0.25 = 25/40）；
-        // 跨组（selinuxfs vs fs:/data/adb）的 HIT 不互相折减，影子 == 正式。
+        // 跨组（selinuxfs vs fs:/data/adb）的 HIT 不互相折减，两口径一致。
+        // v2.23.0 转正后比值改看 正式分 / 未折减分（legacyScore）。
         val sameGroup = listOf(
             gev("F.SELINUX_POLICY", "selinuxfs"),
             gev("F.SELINUX_FILTERED", "selinuxfs"),
         )
         val r1 = ScoringModel.score(sameGroup, emptyList(), DeviceProfile())
-        assertEquals(25.0 / 40.0, r1.shadowScore / r1.score, 0.01)
+        assertEquals(25.0 / 40.0, r1.score / r1.legacyScore, 0.01)
 
         val crossGroup = listOf(
             gev("F.SELINUX_POLICY", "selinuxfs"),
             gev("A.DATA_ADB", "fs:/data/adb"),
         )
         val r2 = ScoringModel.score(crossGroup, emptyList(), DeviceProfile())
+        assertEquals(r2.score, r2.legacyScore, 0.001)
         assertEquals(r2.score, r2.shadowScore, 0.001)
     }
 
@@ -176,13 +197,14 @@ class ScoringModelTest {
         )
         val r1 = ScoringModel.score(cross, emptyList(), DeviceProfile())
         assertEquals(r1.score, r1.shadowScore, 0.001)
+        assertEquals(r1.score, r1.legacyScore, 0.001)
 
         val same = listOf(
             gev("A.SUSFS_TRACE", "procfs"),
             gev("A.KSU_TRACE", "procfs"),
         )
         val r2 = ScoringModel.score(same, emptyList(), DeviceProfile())
-        assertEquals(25.0 / 40.0, r2.shadowScore / r2.score, 0.01)
+        assertEquals(25.0 / 40.0, r2.score / r2.legacyScore, 0.01)
     }
 
     @Test

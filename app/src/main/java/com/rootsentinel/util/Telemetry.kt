@@ -72,6 +72,9 @@ object Telemetry {
             })
             put("report", JSONObject().apply {
                 put("grade", r.score.grade.name)
+                // v2.23.0 双轨过渡：未折减口径的等级一并上报，
+                // 服务端据此监控同源折减转正后的评级漂移。
+                put("gradeLegacy", r.score.legacyGrade.name)
                 put("root", r.score.rootScore)
                 put("integ", r.score.integrityScore)
                 put("hook", r.score.hookScore)
@@ -92,13 +95,13 @@ object Telemetry {
      * 上传一份诊断摘要。必须在 IO 线程调用（内部是阻塞网络 IO）。
      * 未配置接收端时直接返回。任何异常都吞掉——见类注释的失败语义。
      */
-    fun upload(r: DetectorEngine.Result) {
+    fun upload(context: android.content.Context, r: DetectorEngine.Result) {
         if (!configured) return
         runCatching {
-            // v2.22.48 起：明文先经 ReportCrypto 封成加密信封再发，
-            // 接收端验签+解密后才落日志（协议见 ReportCrypto 注释）。
-            val body = ReportCrypto.seal(buildPayload(r).toString())
-                .toByteArray(Charsets.UTF_8)
+            // v2.23.0 起封包走 Uplink：优先协议 v3（设备密钥
+            // 签名），身份不可用时回退 v2 加密信封（ReportCrypto）。
+            val sealed = Uplink.seal(buildPayload(r).toString()) ?: return
+            val body = sealed.toByteArray(Charsets.UTF_8)
             val conn = URL(UPLOAD_ENDPOINT).openConnection() as HttpURLConnection
             try {
                 conn.requestMethod = "POST"

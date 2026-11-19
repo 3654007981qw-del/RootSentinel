@@ -40,9 +40,31 @@ std::vector<std::string> describeTaint(long long v) {
     return out;
 }
 
+// v2.23.0（安全架构阶段四·通道交叉验证）：sysctl 读取改走
+// readFile3 三视角（RAW openat / libc fopen / stream）。判定口径
+// 与旧 readFile 严格一致——只认 RAW 视角的内容，RAW 读不到即
+// 「不可读」；三视角的可见性/一致性结论只进证据附注（views），
+// 不改变任何判定。设施在 util 里建好已久，本文件是首个接入方：
+// 它每个结论只靠一次读取，是全仓最薄的一层。
+std::string g_lastViewsNote;
+
 bool readSysctl(const std::string& path, std::string& out) {
-    out = trim(readFile(path, 4096));
+    const Read3 r3 = readFile3(path, 4096);
+    g_lastViewsNote.clear();
+    if (!r3.consistent) {
+        g_lastViewsNote = r3.note + RSs("（可读视角 ") +
+                          std::to_string(r3.readableViews) + RSs("/3）");
+    } else if (r3.crossVerified) {
+        g_lastViewsNote = RSs("三视角可读性一致（") +
+                          std::to_string(r3.readableViews) + RSs("/3）");
+    }
+    if (!r3.ok_raw) return false;
+    out = trim(r3.data_raw);
     return !out.empty();
+}
+
+void attachViews(Evidence& e) {
+    if (!g_lastViewsNote.empty()) e.addVector(RSs("views"), g_lastViewsNote);
 }
 
 }  // namespace
@@ -69,11 +91,13 @@ void checkKernelTaint(ScanReport& r) {
                 e.detail = RSs("原厂 Android 的模块全部在树内且已签名，"
                                "这两位恒为 0。置位说明有人 insmod 了自编译 ko —— "
                                "LKM 型 root 的直接证据");
+                attachViews(e);
                 r.add(std::move(e));
             } else if (v == 0) {
                 Evidence e = makePass(RSs("F.TAINTED"), Category::KERNEL,
                                       RSs("内核 taint 为 0（完全干净）"));
                 e.addVector(RSs("tainted"), "0");
+                attachViews(e);
                 r.add(std::move(e));
             } else {
                 Evidence e = makeUnknown(RSs("F.TAINTED"), Category::KERNEL,
@@ -83,6 +107,7 @@ void checkKernelTaint(ScanReport& r) {
                 for (const auto& d : describeTaint(v)) e.addVector(RSs("flag"), d);
                 e.detail = RSs("taint 非 0 但不含 OOT/UNSIGNED 位，"
                                "可能来自驱动异常或厂商调试配置");
+                attachViews(e);
                 r.add(std::move(e));
             }
         }
@@ -105,11 +130,13 @@ void checkKernelTaint(ScanReport& r) {
             e.detail = RSs("原厂 Android 恒 >= 1；为 0 通常是 root 方案"
                            "为了让 kallsyms 可读而改的");
             e.fp_note = RSs("userdebug / eng 版本可能默认 0");
+            attachViews(e);
             r.add(std::move(e));
         } else {
             Evidence e = makePass(RSs("F.KPTR_RESTRICT"), Category::KERNEL,
                                   RSs("kptr_restrict 已启用"));
             e.addVector(RSs("value"), v);
+            attachViews(e);
             r.add(std::move(e));
         }
     }
@@ -127,11 +154,13 @@ void checkKernelTaint(ScanReport& r) {
                                  RSs("dmesg_restrict = 0（内核日志对 App 开放）"));
             e.addVector(RSs("value"), v);
             e.detail = RSs("Android 原厂恒为 1；为 0 可让普通 App 读内核日志");
+            attachViews(e);
             r.add(std::move(e));
         } else {
             Evidence e = makePass(RSs("F.DMESG_RESTRICT"), Category::KERNEL,
                                   RSs("dmesg_restrict 已启用"));
             e.addVector(RSs("value"), v);
+            attachViews(e);
             r.add(std::move(e));
         }
     }
@@ -149,11 +178,13 @@ void checkKernelTaint(ScanReport& r) {
                                  RSs("允许非特权进程使用 eBPF"));
             e.addVector(RSs("value"), v);
             e.detail = RSs("Android 默认禁用；开启后可用 eBPF 做内核级 hook");
+            attachViews(e);
             r.add(std::move(e));
         } else {
             Evidence e = makePass(RSs("F.UNPRIV_BPF"), Category::KERNEL,
                                   RSs("非特权 eBPF 已禁用"));
             e.addVector(RSs("value"), v);
+            attachViews(e);
             r.add(std::move(e));
         }
     }
@@ -176,6 +207,7 @@ void checkKernelTaint(ScanReport& r) {
             } else {
                 e.detail = RSs("模块加载仍可能（需 root 才能 insmod）");
             }
+            attachViews(e);
             r.add(std::move(e));
         }
     }

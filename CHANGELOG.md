@@ -3,6 +3,24 @@
 更新说明从 2.22.82 起中英双语；2.22.81 及更早的条目已一并改写。
 Release notes are bilingual (Chinese / English) from 2.22.82 on; older entries have been rewritten to match.
 
+## 2.23.0 — 2026-11-19
+
+**大版本：上报换上每设备签名身份，同源证据折减转正，.so 导出符号收敛。**
+**Major release: per-device signed report identity, same-source evidence discounting promoted to official scoring, native export surface closed down.**
+
+- 上报协议升到 v3：以前所有安装共用一把上报密钥，谁拿到安装包谁就能照着协议伪造一份「检测报告」发给服务器，数据真假全凭自觉。这版改成每台设备在系统密钥库里生成自己的密钥对，私钥不出设备，每份报告和崩溃日志都带设备签名；服务器按公钥登记设备、验签通过才收。伪造的门槛从「下载一个安装包」变成「攻破一台真实设备的密钥库」。隐私声明同步补了设备身份一段：公钥是随机生成的，不含硬件序列号，可在设置里随时重置，重置后以新身份登记、旧上报不再关联。密钥不可用时自动退回旧协议，不挡扫描也不挡上报。
+  Report uploads move to protocol v3. Previously every install shared one upload key, so anyone with the APK could forge a "scan report" and the server had no way to tell real data from made-up data. Each device now generates its own key pair inside the system keystore — the private key never leaves the device — and signs every report and crash log; the server registers devices by public key and only accepts uploads whose signature verifies. Forging data now takes compromising a real device's keystore instead of downloading an APK. The declaration gains a matching paragraph: the public key is randomly generated, contains no hardware serial, and can be reset in Settings at any time, after which the device registers as a new identity and old reports no longer link to it. If the keystore is unavailable the app falls back to the previous protocol — scanning and reporting are never blocked.
+- 服务器侧配套（v11-cf，已单独部署）：按「设备已登记 + 官方版本登记」给每份数据打可信等级，伪造和自构版本的数据与正式数据分开统计；每个设备每天的上报量有上限；新增签名策略下发，客户端验签后才认，用来下发最低版本与评分口径这类参数；旧协议通道暂时保留，数据按低可信等级入库，给老版本留了退场时间表。
+  Server side (v11-cf, deployed separately): every stored report now carries a trust grade based on device registration and an official-build registry, so forged or self-built submissions are counted apart from genuine data; each device gets a daily upload cap; and a signed policy channel was added — the client verifies the signature before honoring it — for parameters like minimum version and scoring mode. The old protocol keeps working during a transition window, with its data stored at the lowest trust grade and a published sunset date.
+- 同源证据折减从影子评分转正：.82 起评分器一直在背后试算一套「同源折减」口径——来自同一底层来源的证据不按多份独立证据重复计权，只按「一个主证据 + 弱佐证」算。影子口径跑了四个版本、与正式口径逐份对照没有异常，这版正式启用。过渡期双轨保留：旧口径的等级会随报告一并上传供服务端比对，导出 JSON 里也同时给出两套分数；万一折减口径在某种设备上表现不对，服务端策略可以远程切回旧口径，不用等发版。
+  Same-source evidence discounting is now the official scoring. Since .82 the scorer has been shadow-computing a second total in which evidence from one underlying source no longer counts as several independent confirmations, only as one main item plus weak corroboration. After four releases of side-by-side comparison with no anomalies, that total is now the score. The transition is dual-track: the legacy grade still rides along with each upload so the server can watch for drift, exported JSON carries both totals, and if the discounted scoring ever misbehaves on some device class, a signed policy can switch clients back to the legacy scoring without waiting for a new release.
+- 签名自校验加了第二条通道：以前是 Java 层经系统服务拿到证书摘要再送 native 比对，系统服务这一段被 Hook 就能喂假摘要。现在 native 直接读 APK 文件里的签名块、自己算证书摘要，两条通道独立比对，任一不符即判不符。真机样本已离线验证：从发布包里解出的证书摘要与构建基线逐字一致。
+  Signature self-check gained a second channel. The Java side used to fetch the certificate digest through the package manager and hand it to native for comparison — hook that service call and you could feed it a fake digest. Native now also parses the APK signing block straight from the file and hashes the certificate itself; the two channels are compared independently and a mismatch on either one is a mismatch. Verified offline against the shipped package: the certificate digest extracted from the release APK matches the build baseline exactly.
+- .so 导出符号从 2016 个收敛到 3 个：发布库之前把链接进来的 C++ 标准库符号整表导出，等于随包附送一份内部结构图。这版加了导出版本脚本与静态库符号排除，只留三个 JNI 入口，构建发布门新增硬校验：符号数超标直接不让出包。
+  The native library's exported symbols drop from 2016 to 3. The shipped .so used to re-export the whole statically linked C++ standard library — an internal structure map handed to anyone who downloads the APK. An export version script plus archive-symbol exclusion now leave only the three JNI entry points, and the release gate fails the build if the count ever grows past the threshold again.
+- 供应链零碎收尾：CI 的第三方 Action 全部钉到提交哈希、工作流令牌降为只读；本地构建管线给依赖目录加了哈希清单校验，依赖被替换会在构建时直接失败；仓库新增 SBOM.json 依赖清单；发布签名密钥迁出工作区目录单独存放。
+  Supply-chain tidy-up: CI actions are pinned to commit hashes and the workflow token is read-only; the local build pipeline now verifies a hash manifest of its dependency directory and fails closed on any mismatch; an SBOM.json dependency inventory ships in the repo; and the release signing key moved out of the workspace tree into its own restricted location.
+
 ## 2.22.86 — 2026-11-19
 
 **第二轮审计修复：崩溃堆栈脱敏、声明补上 IP、证据来源按路径分组。**

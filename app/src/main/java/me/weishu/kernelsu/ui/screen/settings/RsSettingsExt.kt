@@ -17,6 +17,8 @@ data class RsPrivacyState(
     // v2.22.70: 界面皮肤（"ksu" / "sukisu"）与主页背景图状态
     val uiSkin: String,
     val hasCustomBg: Boolean,
+    // v2.23.0: 设备身份摘要（kid 前缀 + 密钥等级），无身份时为提示文案
+    val identitySummary: String,
 )
 
 @Immutable
@@ -33,4 +35,6 @@ data class RsSettingsActions(
     val onSetUiSkin: (String) -> Unit,
     val onPickHomeBg: () -> Unit,
     val onResetHomeBg: () -> Unit,
+    // v2.23.0
+    val onResetIdentity: () -> Unit,
 )
