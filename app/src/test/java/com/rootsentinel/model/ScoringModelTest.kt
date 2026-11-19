@@ -166,6 +166,26 @@ class ScoringModelTest {
     }
 
     @Test
+    fun shadowScoreTreatsPathDerivedGroupsAsDistinctSources() {
+        // v2.22.86 E1：来源组按命中路径派生后，SUSFS 的 /proc 证据
+        // （procfs）与 ramdisk 证据（fs:/debug_ramdisk）是不同来源，
+        // 不互相折减；两条同为 procfs 的证据仍按同源折减。
+        val cross = listOf(
+            gev("A.SUSFS_TRACE", "procfs"),
+            gev("A.MAGISK_TRACE", "fs:/debug_ramdisk"),
+        )
+        val r1 = ScoringModel.score(cross, emptyList(), DeviceProfile())
+        assertEquals(r1.score, r1.shadowScore, 0.001)
+
+        val same = listOf(
+            gev("A.SUSFS_TRACE", "procfs"),
+            gev("A.KSU_TRACE", "procfs"),
+        )
+        val r2 = ScoringModel.score(same, emptyList(), DeviceProfile())
+        assertEquals(25.0 / 40.0, r2.shadowScore / r2.score, 0.01)
+    }
+
+    @Test
     fun shadowScoreIgnoresGroupedPasses() {
         // 只有 HIT 进影子桶：同组一条 HIT + 一条 PASS，
         // 影子分应与正式分一致（PASS 本来就不计分）。

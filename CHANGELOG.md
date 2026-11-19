@@ -3,6 +3,20 @@
 更新说明从 2.22.82 起中英双语；2.22.81 及更早的条目已一并改写。
 Release notes are bilingual (Chinese / English) from 2.22.82 on; older entries have been rewritten to match.
 
+## 2.22.86 — 2026-11-19
+
+**第二轮审计修复：崩溃堆栈脱敏、声明补上 IP、证据来源按路径分组。**
+**Second audit-fix round: crash stacks sanitized, the IP gap in the declaration closed, evidence grouped by hit path.**
+
+- 崩溃堆栈以前漏脱敏：上传前只处理了异常消息字段，堆栈却是原文打印，首行和 Caused by 行把消息原样又带了一遍，路径和参数照样出门。这版堆栈与消息走同一套脱敏规则（URL、绝对路径、邮箱一律抹除），该留的类名、方法帧都保留，定位能力不受影响。
+  Crash stacks slipped past sanitization: only the exception message field was cleaned before upload, while the stack went out as a raw printout whose first line and Caused by lines repeated that same message verbatim — paths and parameters included. Stacks now pass through the same rules as the message (URLs, absolute paths, and email-shaped strings are stripped), while the class names and frames needed for debugging stay.
+- 首次声明补了一段网络地址说明：上传走公网，服务器会看到当时的公网 IP，只用于防滥用限流的计数和被拒请求的安全日志，不写进报告与崩溃记录的内容，也不和任何设备标识关联。这一段以前没写，是声明与实际行为对不上的缺口，现在对齐了。
+  The first-launch declaration now says what happens to your network address: uploads travel over the internet, so the server sees the public IP of the moment. It is used only for anti-abuse rate-limit counters and the security log of rejected requests; it is never written into report or crash contents and is not tied to any device identifier. This paragraph was missing — the declaration did not match actual behavior — and now it does.
+- 证据来源分组改成按命中路径派生：Magisk、KernelSU、APatch、Shamiko、SUSFS 这几张路径清单以前不论哪条路径命中，整表只记一个来源组；现在按命中路径所在的挂载与文件系统分别记组（ramdisk、/system、/vendor、procfs、sysfs、devtmpfs 各算各的），同 ID 按组拆开发射。SUSFS 与 Magisk 模块挂载两项以前干脆没有组，这次补上。变的只是影子评分的同源折减口径，正式评分与评级不变。
+  Evidence source groups are now derived from the path that actually hit: the Magisk, KernelSU, APatch, Shamiko, and SUSFS path lists used to stamp one fixed group on the whole table no matter which path matched. Each hit is now grouped by its own mount and filesystem — ramdisk, /system, /vendor, procfs, sysfs, and devtmpfs each count as their own source — and a scheme emits one record per group under the same ID. SUSFS and the Magisk module-mount check had no group at all before; they do now. Only the shadow score's same-source discounting changes; the official score and grade are untouched.
+- 接收服务端升到 v10-cf（已单独部署）：上报载荷与信封各层加了字段白名单，多塞的字段直接拒收；超大请求在限流计数之前就被拒，不再白吃数据库操作；报告与崩溃记录加了时间索引；保留期清理从「请求时概率触发」改为每天定时执行并记录结果；崩溃摘要日志在写入前剥离控制字符，客户端字段伪造不了日志行。限流在计数故障时放行的既定取舍保持不变。客户端协议未变，旧版本照常上报。
+  The receiving server moved to v10-cf (deployed separately): report payloads and the envelope now enforce a field whitelist at every level, and unknown fields are rejected; oversized requests are refused before rate-limit counting instead of consuming database operations first; reports and crashes gained time indexes; retention cleanup runs on a daily schedule with logged results instead of firing probabilistically on requests; and control characters are stripped from client fields before they reach the crash summary log, so a payload can no longer forge log lines. The deliberate fail-open choice for rate-limit counting stays as it was. The client protocol is unchanged and older versions keep reporting as before.
+
 ## 2.22.85 — 2026-11-18
 
 **外壳切换补上交叉淡化，这次真无缝了。**

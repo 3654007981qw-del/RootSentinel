@@ -30,6 +30,10 @@ import java.net.URL
  * v2.22.82（联合审查 S7）：异常 message 上传前脱敏（抹除
  * URL、绝对路径、邮箱样式子串并截断 200 字）——message 可能
  * 夹带路径与业务参数，异常类型与堆栈帧才是定位所需。
+ * v2.22.86（联合审查 C1）：同一套脱敏规则补到 stack——此前
+ * stack 是 printStackTrace 原文，其首行与 Caused by 行会原样
+ * 重复异常 message，等于绕过了 S7 的脱敏。stack 只脱敏不按
+ * 200 字截断，仍保留 48K 总长上限。
  *
  * ## 跨进程防重复（v2.22.82，联合审查 C1）
  * 本应用有 :probe 独立进程，Application.onCreate 在每个进程
@@ -80,7 +84,9 @@ object CrashReporter {
     fun buildPayload(thread: Thread, error: Throwable): JSONObject {
         val sw = StringWriter()
         error.printStackTrace(PrintWriter(sw))
-        var stack = sw.toString()
+        // C1（v2.22.86）：堆栈先脱敏再截断——首行与 Caused by 行
+        // 带着原始 message，不脱敏等于白脱 message 字段。
+        var stack = sanitizeText(sw.toString())
         if (stack.length > MAX_STACK_CHARS) stack = stack.substring(0, MAX_STACK_CHARS)
         return JSONObject().apply {
             put("kind", "crash")
@@ -105,14 +111,19 @@ object CrashReporter {
         }
     }
 
-    /** S7：异常 message 脱敏——抹除 URL、绝对路径、邮箱样式子串并截断。 */
-    private fun sanitizeMessage(raw: String?): String {
-        if (raw.isNullOrEmpty()) return ""
+    /** S7 + C1 共用脱敏规则：抹除 URL、绝对路径、邮箱样式子串（不截断）。 */
+    private fun sanitizeText(raw: String): String {
         var s = raw.replace(Regex("https?://\\S+"), "<url>")
         s = s.replace(Regex("(?:^|[\\s\"':(=])/(?:data|sdcard|storage|system|proc|sys)/\\S*"), "<path>")
         s = s.replace(Regex("[\\w.+-]+@[\\w-]+\\.[\\w.]+"), "<mail>")
-        if (s.length > 200) s = s.substring(0, 200)
         return s
+    }
+
+    /** S7：异常 message 脱敏——共用规则之上再截断 200 字。 */
+    private fun sanitizeMessage(raw: String?): String {
+        if (raw.isNullOrEmpty()) return ""
+        val s = sanitizeText(raw)
+        return if (s.length > 200) s.substring(0, 200) else s
     }
 
     /**

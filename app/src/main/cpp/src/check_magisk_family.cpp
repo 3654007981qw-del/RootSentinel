@@ -47,10 +47,26 @@ struct Scheme {
     std::string              id;
     std::string              name;
     std::vector<std::string> paths;
-    // v2.22.82 E1：证据来源组。探 /debug_ramdisk 的方案与
-    // A.DEBUG_RAMDISK 同源（同一目录事实的多种表现）。
-    std::string              group;
 };
+
+// v2.22.86 E1（细粒度）：来源组按命中路径派生，不再整表一个
+// 固定组。旧版四个方案不论哪条路径命中都记 fs:/debug_ramdisk，
+// /system、/proc 上的独立命中被误折减、ramdisk 之外的同源关系
+// 也看不出来。命名沿用既有两式：真实挂载用 fs:/<挂载点>
+// （fs:/debug_ramdisk、fs:/data/adb），虚拟文件系统用类型名
+// （selinuxfs 的同式：procfs / sysfs / devtmpfs），根目录下的
+// 散文件记 rootfs。同一方案按组拆开发射（同 ID 多条与引擎既
+// 有形态一致，评分侧按 ID 去重，正式口径不变）。
+std::string groupForPath(const std::string& p) {
+    const size_t slash = p.find('/', 1);
+    const std::string first =
+        (slash == std::string::npos) ? p : p.substr(0, slash);
+    if (first == RSs("/proc")) return RSs("procfs");
+    if (first == RSs("/sys")) return RSs("sysfs");
+    if (first == RSs("/dev")) return RSs("devtmpfs");
+    if (slash == std::string::npos) return RSs("rootfs");
+    return RSs("fs:") + first;
+}
 
 }  // namespace
 
@@ -116,7 +132,6 @@ void checkMagiskFamily(ScanReport& r) {
                 RSs("/system/etc/init/magisk"),
                 RSs("/vendor/etc/init/magisk"),
             },
-            RSs("fs:/debug_ramdisk"),
         },
         {
             RSs("A.KSU_TRACE"), RSs("KernelSU"),
@@ -128,7 +143,6 @@ void checkMagiskFamily(ScanReport& r) {
                 RSs("/proc/kernelsu"),
                 RSs("/system/etc/init/ksu.rc"),
             },
-            RSs("fs:/debug_ramdisk"),
         },
         {
             RSs("A.APATCH_TRACE"), RSs("APatch"),
@@ -139,7 +153,6 @@ void checkMagiskFamily(ScanReport& r) {
                 RSs("/proc/apatch"),
                 RSs("/system/etc/init/apatch.rc"),
             },
-            RSs("fs:/debug_ramdisk"),
         },
         {
             RSs("A.SHAMIKO_TRACE"), RSs("Shamiko"),
@@ -148,7 +161,6 @@ void checkMagiskFamily(ScanReport& r) {
                 RSs("/dev/shamiko"),
                 RSs("/proc/shamiko"),
             },
-            RSs("fs:/debug_ramdisk"),
         },
         {
             RSs("A.SUSFS_TRACE"), RSs("SUSFS"),
@@ -171,9 +183,15 @@ void checkMagiskFamily(ScanReport& r) {
     };
 
     for (const auto& s : schemes) {
-        int exists = 0, denied = 0, missing = 0, blocked = 0, unverifiable = 0;
-        std::vector<std::string> lines;
-
+        // v2.22.86 E1：先逐路径探针、按 groupForPath 分组（保持
+        // 组首次出现顺序），再逐组按原判定逻辑发射。判定逻辑与
+        // 计数口径和旧版整表版逐项一致，只是作用域收窄到组内；
+        // 评分侧按 ID 去重（HIT > UNKNOWN > PASS），正式分数不变。
+        struct Obs {
+            std::string path;
+            int         err;
+        };
+        std::vector<std::pair<std::string, std::vector<Obs>>> groups;
         for (const auto& p : s.paths) {
             // v2.22.82（联合审查 N1）：改用 errno 精确探针。旧版
             // accessState 的 2 是「EACCES 之外的任何错误」，却被
@@ -181,67 +199,83 @@ void checkMagiskFamily(ScanReport& r) {
             // 全员如此时还会误报「路径全部不存在」。现在只有
             // ENOENT 算不存在，其余错误单列 unverifiable。
             const int err = accessErrnoRaw(p, 0);
-
-            if (err == 0) {
-                ++exists;
-                lines.push_back(p + RSs("=EXISTS"));
-            } else if (err == EACCES || err == EPERM) {
-                if (underBlockedParent(p)) {
-                    ++blocked;  // 父目录不可进 → 无信息量
-                } else {
-                    ++denied;
-                    lines.push_back(p + RSs("=EACCES"));
-                }
-            } else if (err == ENOENT) {
-                ++missing;
-            } else {
-                ++unverifiable;
-                lines.push_back(p + RSs("=ERR") + std::to_string(err));
+            const std::string g = groupForPath(p);
+            auto it = groups.begin();
+            for (; it != groups.end(); ++it) {
+                if (it->first == g) break;
             }
+            if (it == groups.end()) {
+                groups.push_back({g, {}});
+                it = groups.end() - 1;
+            }
+            it->second.push_back({p, err});
         }
 
-        if (exists > 0) {
-            Evidence e = makeHit(s.id, Category::ARTIFACT, Severity::CRITICAL,
-                                 Confidence::HIGH,
-                                 s.name + RSs(" 痕迹存在"));
-            e.sourceGroup = s.group;
-            for (const auto& l : lines) e.addVector(RSs("path"), l);
-            e.addVector(RSs("missing"), std::to_string(missing));
-            if (unverifiable > 0) e.addVector(RSs("unverifiable"), std::to_string(unverifiable));
-            e.detail = RSs("路径对普通 App 竟然可访问 → 权限被改过");
-            r.add(std::move(e));
-        } else if (denied > 0) {
-            // v2.22.42（P1-03）：EACCES-only 不再推断「目录存在」。
-            // EACCES 只说明这条路径走不通：中间目录 DAC、SELinux
-            // 路径遍历拒绝、厂商 LSM 策略在正常 ROM 上同样产生它；
-            // 多个方案共享同一拒绝原因时还会重复计分。
-            // 改判 UNKNOWN，拿到独立存在性证据才允许升 HIT。
-            Evidence e = makeUnknown(s.id, Category::ARTIFACT, Severity::LOW,
-                                     s.name + RSs(" 路径被拒绝访问（存在性未确认）"));
-            e.sourceGroup = s.group;
-            for (const auto& l : lines) e.addVector(RSs("path"), l);
-            e.addVector(RSs("denied"), std::to_string(denied));
-            e.addVector(RSs("missing"), std::to_string(missing));
-            if (unverifiable > 0) e.addVector(RSs("unverifiable"), std::to_string(unverifiable));
-            e.detail = RSs("EACCES 可能来自中间目录权限或 SELinux 遍历拒绝，"
-                           "不作为目标存在的证据");
-            r.add(std::move(e));
-        } else if (missing == (int)s.paths.size()) {
-            Evidence e = makePass(s.id, Category::ARTIFACT,
-                                  s.name + RSs(" 路径全部不存在"));
-            e.sourceGroup = s.group;
-            e.addVector(RSs("checked"), std::to_string(missing));
-            r.add(std::move(e));
-        } else {
-            Evidence e = makeUnknown(s.id, Category::ARTIFACT, Severity::LOW,
-                                     s.name + (unverifiable > 0
-                                         ? RSs(" 观测不完整（部分路径不可验）")
-                                         : RSs(" 路径位于受限父目录下")));
-            e.sourceGroup = s.group;
-            e.addVector(RSs("blocked_by_parent"), std::to_string(blocked));
-            e.addVector(RSs("missing"), std::to_string(missing));
-            if (unverifiable > 0) e.addVector(RSs("unverifiable"), std::to_string(unverifiable));
-            r.add(std::move(e));
+        for (const auto& [group, obs] : groups) {
+            int exists = 0, denied = 0, missing = 0, blocked = 0, unverifiable = 0;
+            std::vector<std::string> lines;
+            for (const auto& o : obs) {
+                if (o.err == 0) {
+                    ++exists;
+                    lines.push_back(o.path + RSs("=EXISTS"));
+                } else if (o.err == EACCES || o.err == EPERM) {
+                    if (underBlockedParent(o.path)) {
+                        ++blocked;  // 父目录不可进 → 无信息量
+                    } else {
+                        ++denied;
+                        lines.push_back(o.path + RSs("=EACCES"));
+                    }
+                } else if (o.err == ENOENT) {
+                    ++missing;
+                } else {
+                    ++unverifiable;
+                    lines.push_back(o.path + RSs("=ERR") + std::to_string(o.err));
+                }
+            }
+
+            if (exists > 0) {
+                Evidence e = makeHit(s.id, Category::ARTIFACT, Severity::CRITICAL,
+                                     Confidence::HIGH,
+                                     s.name + RSs(" 痕迹存在"));
+                e.sourceGroup = group;
+                for (const auto& l : lines) e.addVector(RSs("path"), l);
+                e.addVector(RSs("missing"), std::to_string(missing));
+                if (unverifiable > 0) e.addVector(RSs("unverifiable"), std::to_string(unverifiable));
+                e.detail = RSs("路径对普通 App 竟然可访问 → 权限被改过");
+                r.add(std::move(e));
+            } else if (denied > 0) {
+                // v2.22.42（P1-03）：EACCES-only 不再推断「目录存在」。
+                // EACCES 只说明这条路径走不通：中间目录 DAC、SELinux
+                // 路径遍历拒绝、厂商 LSM 策略在正常 ROM 上同样产生它；
+                // 多个方案共享同一拒绝原因时还会重复计分。
+                // 改判 UNKNOWN，拿到独立存在性证据才允许升 HIT。
+                Evidence e = makeUnknown(s.id, Category::ARTIFACT, Severity::LOW,
+                                         s.name + RSs(" 路径被拒绝访问（存在性未确认）"));
+                e.sourceGroup = group;
+                for (const auto& l : lines) e.addVector(RSs("path"), l);
+                e.addVector(RSs("denied"), std::to_string(denied));
+                e.addVector(RSs("missing"), std::to_string(missing));
+                if (unverifiable > 0) e.addVector(RSs("unverifiable"), std::to_string(unverifiable));
+                e.detail = RSs("EACCES 可能来自中间目录权限或 SELinux 遍历拒绝，"
+                               "不作为目标存在的证据");
+                r.add(std::move(e));
+            } else if (missing == (int)obs.size()) {
+                Evidence e = makePass(s.id, Category::ARTIFACT,
+                                      s.name + RSs(" 路径全部不存在"));
+                e.sourceGroup = group;
+                e.addVector(RSs("checked"), std::to_string(missing));
+                r.add(std::move(e));
+            } else {
+                Evidence e = makeUnknown(s.id, Category::ARTIFACT, Severity::LOW,
+                                         s.name + (unverifiable > 0
+                                             ? RSs(" 观测不完整（部分路径不可验）")
+                                             : RSs(" 路径位于受限父目录下")));
+                e.sourceGroup = group;
+                e.addVector(RSs("blocked_by_parent"), std::to_string(blocked));
+                e.addVector(RSs("missing"), std::to_string(missing));
+                if (unverifiable > 0) e.addVector(RSs("unverifiable"), std::to_string(unverifiable));
+                r.add(std::move(e));
+            }
         }
     }
 
